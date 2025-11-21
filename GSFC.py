@@ -12,7 +12,7 @@ import math
 class GSFC:
     def __init__(self, gsfc_id, src_vsg_id, dst_vsg_id, vnf_sequence, tolerance_time_ms, mode, gsfc_log_path):
         self.id = gsfc_id
-        self.mode = mode # basic, dd, noname
+        self.mode = mode # basic, dd, sd
         self.vnf_sequence = vnf_sequence
         self.src_vsg_id = src_vsg_id
         self.dst_vsg_id = dst_vsg_id
@@ -24,13 +24,13 @@ class GSFC:
         self.tolerance_time_ms = tolerance_time_ms # mMTC 시나리오에서 기다릴 수 있는 최대 시간 [ms]
         self.gsfc_log_path = gsfc_log_path
 
-        self.cur_vsg_path_id = 0 # noname 변수 (현재 satellite_path를 만드는데 사용한 vsg_idx)
+        self.cur_vsg_path_id = 0 # sd 변수 (현재 satellite_path를 만드는데 사용한 vsg_idx)
         self.processed_vnfs_size = []
         self.gsfc_flow_rule = [] # 필수 VSG 경로 구성
         self.vsg_path = [] # 실제 VSG 경로 구성
         self.satellite_path = []
         self.cur_path_id = 0 # 현재 실행해야하는 path 인덱스
-        self.node_id_to_move = -1 #이동해야할 sat id
+        self.node_id_to_move = -1 # 이동해야할 sat id
 
         self.proc_delay_ms = 0
         self.prop_delay_ms = 0
@@ -41,9 +41,9 @@ class GSFC:
 
         self.estimated_remain_proc_delay = 0
         self.state = 1 # 1: process, 2: queue, 3: transmit, 4: propagate
+        self.is_appended = False # sd 방식에서 경로 연장에 대한 변수
         self.DH_remaining_ongoing_time_slot = 0
         self.current_remaining_vnf_process = 0
-        self.test_id = 0 # 현재 처리 중인 satellite path idx
 
         self.set_vnf_sizes()
 
@@ -273,7 +273,7 @@ class GSFC:
         # print(f"  -> processed satellite path {self.processed_satellite_path}")
         # print(f"  -> NEW satellite path {self.satellite_path}")
 
-    def set_noname_satellite_path(self, all_vsg_list, all_gserver_list, all_sat_list, G, vsg_G):
+    def set_sd_satellite_path(self, all_vsg_list, all_gserver_list, all_sat_list, G, vsg_G):
         # src vsg에 prev sat, src sat 존재
         # dst vsg에 dst sat, vnf sat 존재
         # src sat과 dst sat은 vsg 간 최단 egress ingress node
@@ -434,7 +434,7 @@ class GSFC:
 
             self.cur_vsg_path_id += 1
 
-        print(f"\n========== NONAME GSFC {self.id} ==========")
+        print(f"\n========== SD GSFC {self.id} ==========")
         print(f"  -> src {self.src_vsg_id}")
         print(f"  -> dst {self.dst_vsg_id}")
         print(f"  -> vnf sequence {self.vnf_sequence}")
@@ -832,7 +832,7 @@ class GSFC:
                 print(f"  -> BEFORE satellite path {self.satellite_path}, cur_path_id {self.cur_path_id} processed satellite path {self.satellite_path[:self.cur_path_id]}")
                 self.update_basic_satellite_path(all_vsg_list, all_gserver_list, all_sat_list, G)
                 print(f"  -> AFTER satellite path {self.satellite_path}, cur_path_id {self.cur_path_id} processed satellite path {self.satellite_path[:self.cur_path_id]}")
-            elif mode == 'noname':
+            elif mode == 'sd':
                 pass
             else:
                 print("\n")
@@ -951,8 +951,11 @@ class GSFC:
                 self.is_succeed = True
                 write_gsfc_csv_log(self.gsfc_log_path, t, self, "DONE")
             else:  # 처리 다 했는데? dst 안 거침????? 이새키 뭐야
-                if self.mode == 'noname':  # noname은 원래 다음 vsg까지의 경로만을 만듦 => 다음 vsg까지의 경로 생성
-                    self.set_noname_satellite_path(all_vsg_list, all_gserver_list, all_sat_list, G, vsg_G)
+                if self.mode == 'sd':  # sd 원래 다음 vsg까지의 경로만을 만듦 => 다음 vsg까지의 경로 생성
+                    self.set_sd_satellite_path(all_vsg_list, all_gserver_list, all_sat_list, G, vsg_G)
+                    self.cur_path_id -= 1
+                    self.state = 1
+                    self.is_appended = True
                 else:  # 얘네는 안됨!!!!!! 다 처리했어야함!!!!
                     self.is_dropped = True
                     write_gsfc_csv_log(self.gsfc_log_path, t, self, "DROP")
@@ -974,8 +977,9 @@ class GSFC:
                 cur_node_id, cur_vnf_tag = self.satellite_path[self.cur_path_id]
                 cur_node_type, cur_node = get_node_type(cur_node_id, all_gserver_list, all_sat_list)
 
-                if not has_vnf_tag(cur_vnf_tag): # vnf 처리 필요 여부 파악
+                if (not has_vnf_tag(cur_vnf_tag)) or self.is_appended: # vnf 처리 필요 여부 파악
                     estimated_remain_proc_delay = 0
+                    self.is_appended = False
                 else:
                     estimated_remain_proc_delay = self.DH_accumulate_proc_delay(cur_node, cur_node_type, data_rate_pair)
                 write_gsfc_csv_log(self.gsfc_log_path, t, self, "PROCESS")
@@ -985,7 +989,7 @@ class GSFC:
                     if len(self.satellite_path) == self.cur_path_id:
                         return 0
 
-                    self.node_id_to_move = self.satellite_path[self.cur_path_id]
+                    self.node_id_to_move = self.satellite_path[self.cur_path_id][0]
                     if cur_node_id != self.node_id_to_move:
                         ISL_next_hop = cur_node.get_next_hop_link_idx(self)
                         if ISL_next_hop == None:
@@ -993,7 +997,6 @@ class GSFC:
                         self.DH_set_queue_delay(cur_node, cur_node_type, ISL_next_hop)
                         cur_node.queue_ISL[ISL_next_hop].append((self.id, self.sfc_size))
 
-            # TODO. 이동 중인데 경로가 바뀌면 우짬
             elif self.state == 2: # queue
                 prev_node_id, prev_vnf_tag = self.satellite_path[self.cur_path_id -1]
                 prev_node_type, prev_node = get_node_type(prev_node_id, all_gserver_list, all_sat_list)
@@ -1008,13 +1011,16 @@ class GSFC:
 
                     if prev_node_id == self.node_id_to_move: # 이동 없음
                         self.DH_accumulate_proc_delay(next_node, next_node_type, data_rate_pair)
+                        write_gsfc_csv_log(self.gsfc_log_path, t, self, "DETOUR")
                         return 0
                     else:
                         ISL_next_hop = prev_node.get_next_hop_link_idx(self)
                         if ISL_next_hop == None:
                             input(f"{prev_node_id}, {self.node_id_to_move}")
-                        self.DH_set_queue_delay(prev_node_id, prev_node_type, ISL_next_hop)
+                        self.DH_set_queue_delay(prev_node, prev_node_type, ISL_next_hop)
                         prev_node.queue_ISL[ISL_next_hop].append((self.id, self.sfc_size))
+                        write_gsfc_csv_log(self.gsfc_log_path, t, self, "DETOUR")
+                        return 0
 
                 write_gsfc_csv_log(self.gsfc_log_path, t, self, "QUEUE")
 
@@ -1036,13 +1042,16 @@ class GSFC:
 
                     if prev_node_id == self.node_id_to_move: # 이동 없음
                         self.DH_accumulate_proc_delay(next_node, next_node_type, data_rate_pair)
+                        write_gsfc_csv_log(self.gsfc_log_path, t, self, "DETOUR")
                         return 0
                     else:
                         ISL_next_hop = prev_node.get_next_hop_link_idx(self)
                         if ISL_next_hop == None:
                             input(f"{prev_node_id}, {self.node_id_to_move}")
-                        self.DH_set_queue_delay(prev_node_id, prev_node_type, ISL_next_hop)
+                        self.DH_set_queue_delay(prev_node, prev_node_type, ISL_next_hop)
                         prev_node.queue_ISL[ISL_next_hop].append((self.id, self.sfc_size))
+                        write_gsfc_csv_log(self.gsfc_log_path, t, self, "DETOUR")
+                        return 0
 
                 write_gsfc_csv_log(self.gsfc_log_path, t, self, "TRANSMIT")
 
@@ -1067,13 +1076,16 @@ class GSFC:
 
                     if prev_node_id == self.node_id_to_move:  # 이동 없음
                         self.DH_accumulate_proc_delay(next_node, next_node_type, data_rate_pair)
+                        write_gsfc_csv_log(self.gsfc_log_path, t, self, "DETOUR")
                         return 0
                     else:
                         ISL_next_hop = prev_node.get_next_hop_link_idx(self)
                         if ISL_next_hop == None:
                             input(f"{prev_node_id}, {self.node_id_to_move}")
-                        self.DH_set_queue_delay(prev_node_id, prev_node_type, ISL_next_hop)
+                        self.DH_set_queue_delay(prev_node, prev_node_type, ISL_next_hop)
                         prev_node.queue_ISL[ISL_next_hop].append((self.id, self.sfc_size))
+                        write_gsfc_csv_log(self.gsfc_log_path, t, self, "DETOUR")
+                        return 0
 
                 write_gsfc_csv_log(self.gsfc_log_path, t, self, "PROPAGATE")
 

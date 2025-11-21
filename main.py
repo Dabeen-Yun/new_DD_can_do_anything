@@ -1,6 +1,7 @@
 from tqdm import tqdm
 from Params import *
 from Simulation import *
+from Utility import *
 
 class Main:
     data_rate_pairs = [  # [sat, gs] 단위 bps
@@ -10,7 +11,7 @@ class Main:
         (320e6, 1280e6)
     ]
 
-    modes = ['basic']  # dd, basic, noname
+    modes = ['basic', 'sd']  # dd, basic, sd
 
     for pair in tqdm(data_rate_pairs):
         for mode in modes:
@@ -18,3 +19,10 @@ class Main:
 
             simulation = Simulation()
             simulation.simulation_proceeding(mode, pair, csv_dir_path)
+
+    # 시뮬 다 돌리고 나서 한 번만 호출
+    plot_e2e_summary(
+        modes=modes,
+        data_rate_pairs=data_rate_pairs,
+        base_results_dir="./results",
+    )

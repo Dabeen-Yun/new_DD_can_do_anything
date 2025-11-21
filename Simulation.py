@@ -469,7 +469,7 @@ class Simulation:
         new_gsfc_id_start = 0
         t = 0 #ms
 
-        for i in range(500):
+        while True:
             print(f"\n==================== TIME TICK {t} MS ====================")
 
             # gsfc 생성
@@ -484,8 +484,8 @@ class Simulation:
                     gsfc.set_vsg_path(self.vsg_G)
                     if mode == "basic":
                         gsfc.set_basic_satellite_path(self.vsg_list, self.G)
-                    elif mode == "noname":
-                        gsfc.set_noname_satellite_path(self.vsg_list, self.gserver_list, self.sat_list, self.G, self.vsg_G)
+                    elif mode == "sd":
+                        gsfc.set_sd_satellite_path(self.vsg_list, self.gserver_list, self.sat_list, self.G, self.vsg_G)
                     else:
                         print("\n")
                         print(f"[ERROR] Unknown mode {mode}")
@@ -493,6 +493,18 @@ class Simulation:
                         return []
                 write_gsfc_csv_log(self.gsfc_log_path, t, gsfc, "INIT_PATH")
                 new_gsfc_id_start += 1
+
+            # 종료 여부 파악
+            all_completed = True
+            for gsfc in self.gsfc_list:
+                if not gsfc.is_succeed and not gsfc.is_dropped:
+                    all_completed = False
+                    break
+
+            if all_completed:
+                print(f"\n*** 모든 GSFC가 succeed 또는 dropped 상태로 완료되었습니다. 시뮬레이션을 종료합니다. ***")
+                # input("\nPress Enter to continue the simulation...\n")
+                break
 
             # gsfc 처리
             for gsfc in self.gsfc_list:
