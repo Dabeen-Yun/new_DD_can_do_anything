@@ -31,6 +31,7 @@ class GSFC:
         self.satellite_path = []
         self.cur_path_id = 0 # 현재 실행해야하는 path 인덱스
         self.node_id_to_move = -1 # 이동해야할 sat id
+        self.ISL_next_hop = None
 
         self.proc_delay_ms = 0
         self.prop_delay_ms = 0
@@ -377,58 +378,58 @@ class GSFC:
             _, vnf_sat_id, dst_vnf_distance_m = get_src_dst_sat(dst_vsg, dst_vsg, [dst_sat_id], candidate_vnf_sat_ids, all_vsg_list)
 
             if dst_sat_id != vnf_sat_id:
-                vnf_sat_avg_queue = mean([len(isl_k) for isl_k in all_sat_list[vnf_sat_id].queue_ISL])
+                # vnf_sat_avg_queue = mean([len(isl_k) for isl_k in all_sat_list[vnf_sat_id].queue_ISL])
+                #
+                # if vnf_sat_avg_queue > 200:
+                #     # gserver까지 graph에 추가
+                #     current_G = G
+                #     selected_gserver_id = dst_vsg.gserver
+                #     if selected_gserver_id is not None:
+                #         current_G = create_temp_gserver_graph(G, all_gserver_list, all_vsg_list, selected_gserver_id)
+                #         # gsfc에 처리 gserver 추가
+                #         selected_gserver = all_gserver_list[selected_gserver_id]
+                #         self.gserver = selected_gserver
+                #
+                #     # dst_sat -> vnf_g
+                #     try:
+                #         sub_path = nx.shortest_path(current_G, source=dst_sat_id, target=selected_gserver_id+NUM_SATELLITES)
+                #
+                #         if len(sub_path) > 2:
+                #             for sid in sub_path[1:-1]:
+                #                 self.satellite_path.append([sid, None])
+                #         self.satellite_path.append([selected_gserver_id+NUM_SATELLITES, dst_vnf])
+                #     except nx.NetworkXNoPath:
+                #         print(f"[ERROR] 3-2 No TRAJECTORY SAT TO SAT")
+                #         self.is_dropped = True
+                #         return []
+                #
+                #     # vnf_g -> vnf_sat
+                #     try:
+                #         sub_path = nx.shortest_path(current_G, source=selected_gserver_id+NUM_SATELLITES, target=vnf_sat_id)
+                #
+                #         if len(sub_path) > 2:
+                #             for sid in sub_path[1:-1]:
+                #                 self.satellite_path.append([sid, None])
+                #         if has_dst_tag(dst_vnf): # TODO. 이렇게 욱여막았지만.. 처리 필요
+                #             self.satellite_path.append([vnf_sat_id, dst_vnf])
+                #         else:
+                #             self.satellite_path.append([vnf_sat_id, None])
+                #     except nx.NetworkXNoPath:
+                #         print(f"[ERROR] 3-2 No TRAJECTORY SAT TO SAT")
+                #         self.is_dropped = True
+                #         return []
+                # else:
+                try:
+                    sub_path = nx.shortest_path(G, source=dst_sat_id, target=vnf_sat_id)
 
-                if vnf_sat_avg_queue > 200:
-                    # gserver까지 graph에 추가
-                    current_G = G
-                    selected_gserver_id = dst_vsg.gserver
-                    if selected_gserver_id is not None:
-                        current_G = create_temp_gserver_graph(G, all_gserver_list, all_vsg_list, selected_gserver_id)
-                        # gsfc에 처리 gserver 추가
-                        selected_gserver = all_gserver_list[selected_gserver_id]
-                        self.gserver = selected_gserver
-
-                    # dst_sat -> vnf_g
-                    try:
-                        sub_path = nx.shortest_path(current_G, source=dst_sat_id, target=selected_gserver_id+NUM_SATELLITES)
-
-                        if len(sub_path) > 2:
-                            for sid in sub_path[1:-1]:
-                                self.satellite_path.append([sid, None])
-                        self.satellite_path.append([selected_gserver_id+NUM_SATELLITES, dst_vnf])
-                    except nx.NetworkXNoPath:
-                        print(f"[ERROR] 3-2 No TRAJECTORY SAT TO SAT")
-                        self.is_dropped = True
-                        return []
-
-                    # vnf_g -> vnf_sat
-                    try:
-                        sub_path = nx.shortest_path(current_G, source=selected_gserver_id+NUM_SATELLITES, target=vnf_sat_id)
-
-                        if len(sub_path) > 2:
-                            for sid in sub_path[1:-1]:
-                                self.satellite_path.append([sid, None])
-                        if has_dst_tag(dst_vnf): # TODO. 이렇게 욱여막았지만.. 처리 필요
-                            self.satellite_path.append([vnf_sat_id, dst_vnf])
-                        else:
-                            self.satellite_path.append([vnf_sat_id, None])
-                    except nx.NetworkXNoPath:
-                        print(f"[ERROR] 3-2 No TRAJECTORY SAT TO SAT")
-                        self.is_dropped = True
-                        return []
-                else:
-                    try:
-                        sub_path = nx.shortest_path(G, source=dst_sat_id, target=vnf_sat_id)
-
-                        if len(sub_path) > 2:
-                            for sid in sub_path[1:-1]:
-                                self.satellite_path.append([sid, None])
-                        self.satellite_path.append([vnf_sat_id, dst_vnf])
-                    except nx.NetworkXNoPath:
-                        print(f"[ERROR] 3-2 No TRAJECTORY SAT TO SAT")
-                        self.is_dropped = True
-                        return []
+                    if len(sub_path) > 2:
+                        for sid in sub_path[1:-1]:
+                            self.satellite_path.append([sid, None])
+                    self.satellite_path.append([vnf_sat_id, dst_vnf])
+                except nx.NetworkXNoPath:
+                    print(f"[ERROR] 3-2 No TRAJECTORY SAT TO SAT")
+                    self.is_dropped = True
+                    return []
             else:
                 self.satellite_path.append([vnf_sat_id, dst_vnf])
 
@@ -883,14 +884,14 @@ class GSFC:
         self.state = 2
         self.DH_remaining_ongoing_time_slot = queue_delay  # 여기에서는 FIFO 구조를 따르므로, 다른 패킷들이 다 나갈 때까지 그냥 기다리는 상황이므로, DH_remaining_ongoing_time_slot으로 조정할 필요가 없음
 
-    def DH_eval_queue_delay(self, node=None, node_type=None, ISL_next_hop=None):
+    def DH_eval_queue_delay(self, node=None, node_type=None):
         queue_delay = 1
         if node_type == 'satellite':
             # TSL, 정확히는 STL
-            if ISL_next_hop == 4:
+            if self.ISL_next_hop == 4:
                 queue = node.queue_TSL
             else:
-                queue = node.queue_ISL[ISL_next_hop]
+                queue = node.queue_ISL[self.ISL_next_hop]
             tmp_sum = 0  # 누적합
             for i in range(len(queue)):
                 size = queue[i][1]
@@ -909,8 +910,8 @@ class GSFC:
                     tmp_sum -= GSERVER_LINK_CAPACITY
         return queue_delay
 
-    def DH_set_queue_delay(self, node=None, node_type=None, ISL_next_hop=None):
-        queue_delay = self.DH_eval_queue_delay(node, node_type, ISL_next_hop)
+    def DH_set_queue_delay(self, node=None, node_type=None):
+        queue_delay = self.DH_eval_queue_delay(node, node_type)
         self.queue_delay_ms += queue_delay
         self.DH_set_state_queue(queue_delay=queue_delay)
 
@@ -991,11 +992,11 @@ class GSFC:
 
                     self.node_id_to_move = self.satellite_path[self.cur_path_id][0]
                     if cur_node_id != self.node_id_to_move:
-                        ISL_next_hop = cur_node.get_next_hop_link_idx(self)
-                        if ISL_next_hop == None:
+                        self.ISL_next_hop = cur_node.get_next_hop_link_idx(self)
+                        if self.ISL_next_hop == None:
                             input(f"{cur_node_id}, {self.node_id_to_move}")
-                        self.DH_set_queue_delay(cur_node, cur_node_type, ISL_next_hop)
-                        cur_node.queue_ISL[ISL_next_hop].append((self.id, self.sfc_size))
+                        self.DH_set_queue_delay(cur_node, cur_node_type)
+                        cur_node.queue_ISL[self.ISL_next_hop].append((self.id, self.sfc_size))
 
             elif self.state == 2: # queue
                 prev_node_id, prev_vnf_tag = self.satellite_path[self.cur_path_id -1]
@@ -1006,26 +1007,35 @@ class GSFC:
                 if next_node_id != self.node_id_to_move: # 경로 재설정됨
                     self.queue_delay_ms -= self.DH_remaining_ongoing_time_slot
                     self.DH_remaining_ongoing_time_slot = 0
-                    # queue 제거
                     self.node_id_to_move = next_node_id
+                    isl_queue = prev_node.queue_ISL[self.ISL_next_hop]
+                    for i, (gsfc_id, size) in enumerate(isl_queue):
+                        if gsfc_id == self.id:
+                            isl_queue.pop(i)
+                            break
 
                     if prev_node_id == self.node_id_to_move: # 이동 없음
                         self.DH_accumulate_proc_delay(next_node, next_node_type, data_rate_pair)
                         write_gsfc_csv_log(self.gsfc_log_path, t, self, "DETOUR")
                         return 0
                     else:
-                        ISL_next_hop = prev_node.get_next_hop_link_idx(self)
-                        if ISL_next_hop == None:
+                        self.ISL_next_hop = prev_node.get_next_hop_link_idx(self)
+                        if self.ISL_next_hop == None:
                             input(f"{prev_node_id}, {self.node_id_to_move}")
-                        self.DH_set_queue_delay(prev_node, prev_node_type, ISL_next_hop)
-                        prev_node.queue_ISL[ISL_next_hop].append((self.id, self.sfc_size))
+                        self.DH_set_queue_delay(prev_node, prev_node_type)
+                        prev_node.queue_ISL[self.ISL_next_hop].append((self.id, self.sfc_size))
                         write_gsfc_csv_log(self.gsfc_log_path, t, self, "DETOUR")
                         return 0
 
                 write_gsfc_csv_log(self.gsfc_log_path, t, self, "QUEUE")
 
                 if self.DH_remaining_ongoing_time_slot <= 1: # 이번 time slot에 queue 종료
-                    # queue 제거?
+                    isl_queue = prev_node.queue_ISL[self.ISL_next_hop]
+                    for i, (gsfc_id, size) in enumerate(isl_queue):
+                        if gsfc_id == self.id:
+                            isl_queue.pop(i)
+                            break
+
                     self.DH_set_trans_delay(prev_node_type)
                 self.DH_remaining_ongoing_time_slot -= 1
 
@@ -1045,21 +1055,18 @@ class GSFC:
                         write_gsfc_csv_log(self.gsfc_log_path, t, self, "DETOUR")
                         return 0
                     else:
-                        ISL_next_hop = prev_node.get_next_hop_link_idx(self)
-                        if ISL_next_hop == None:
+                        self.ISL_next_hop = prev_node.get_next_hop_link_idx(self)
+                        if self.ISL_next_hop == None:
                             input(f"{prev_node_id}, {self.node_id_to_move}")
-                        self.DH_set_queue_delay(prev_node, prev_node_type, ISL_next_hop)
-                        prev_node.queue_ISL[ISL_next_hop].append((self.id, self.sfc_size))
+                        self.DH_set_queue_delay(prev_node, prev_node_type)
+                        prev_node.queue_ISL[self.ISL_next_hop].append((self.id, self.sfc_size))
                         write_gsfc_csv_log(self.gsfc_log_path, t, self, "DETOUR")
                         return 0
 
                 write_gsfc_csv_log(self.gsfc_log_path, t, self, "TRANSMIT")
 
                 if self.DH_remaining_ongoing_time_slot <= 1:  # 이번 time slot에 transmit 종료
-                    ISL_next_hop = prev_node.get_next_hop_link_idx(self)
-                    if ISL_next_hop == None:
-                        print(f"{self.id}")
-                    propagation_delay = math.ceil(prev_node.adj_sat_p_d_list[ISL_next_hop])
+                    propagation_delay = math.ceil(prev_node.adj_sat_p_d_list[self.ISL_next_hop])
                     self.DH_set_prop_delay(propagation_delay)
                 self.DH_remaining_ongoing_time_slot -= 1
 
@@ -1079,11 +1086,11 @@ class GSFC:
                         write_gsfc_csv_log(self.gsfc_log_path, t, self, "DETOUR")
                         return 0
                     else:
-                        ISL_next_hop = prev_node.get_next_hop_link_idx(self)
-                        if ISL_next_hop == None:
+                        self.ISL_next_hop = prev_node.get_next_hop_link_idx(self)
+                        if self.ISL_next_hop == None:
                             input(f"{prev_node_id}, {self.node_id_to_move}")
-                        self.DH_set_queue_delay(prev_node, prev_node_type, ISL_next_hop)
-                        prev_node.queue_ISL[ISL_next_hop].append((self.id, self.sfc_size))
+                        self.DH_set_queue_delay(prev_node, prev_node_type)
+                        prev_node.queue_ISL[self.ISL_next_hop].append((self.id, self.sfc_size))
                         write_gsfc_csv_log(self.gsfc_log_path, t, self, "DETOUR")
                         return 0
 

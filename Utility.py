@@ -306,7 +306,7 @@ def write_gsfc_csv_log(file_path, time_ms, gsfc, event):
 
 def load_all_gsfc_logs(modes, data_rate_pairs, base_results_dir="./results"):
     """
-    results/{NUM_GSFC}/{mode}/{sat_Mbps}sat_{gs_Mbps}gs/gsfc_log_{mode}.csv
+    results/{NUM_GSFC*NUM_ITERATIONS}/{mode}/{sat_Mbps}sat_{gs_Mbps}gs/gsfc_log_{mode}.csv
     구조로 저장된 로그를 모두 읽어서 하나의 DataFrame으로 합친다.
     """
     dfs = []
@@ -316,7 +316,7 @@ def load_all_gsfc_logs(modes, data_rate_pairs, base_results_dir="./results"):
         data_rate_label = f"{sat_mbps}sat_{gs_mbps}gs"
 
         for mode in modes:
-            csv_dir = f"{base_results_dir}/{NUM_GSFC}/{mode}/{data_rate_label}/"
+            csv_dir = f"{base_results_dir}/{NUM_GSFC*NUM_ITERATIONS}/{mode}/{data_rate_label}/"
             csv_path = f"{csv_dir}{mode}_gsfc_log.csv"
 
             if not os.path.exists(csv_path):
@@ -359,22 +359,17 @@ def preprocess_gsfc_logs(df_all):
     # 숫자형 컬럼 변환
     numeric_cols = [
         "time_ms",
-        "proc_delay_ms",
-        "queue_delay_ms",
-        "trans_delay_ms",
-        "prop_delay_ms",
+        "process delay",
+        "queueing delay",
+        "transmitting delay",
+        "propagation delay",
     ]
     for col in numeric_cols:
         if col in df_all.columns:
             df_all[col] = pd.to_numeric(df_all[col], errors="coerce")
 
-    # e2e_delay_ms 계산 (이미 있으면 덮어써도 됨)
-    df_all["e2e_delay_ms"] = (
-        df_all.get("proc_delay_ms", 0)
-        + df_all.get("queue_delay_ms", 0)
-        + df_all.get("trans_delay_ms", 0)
-        + df_all.get("prop_delay_ms", 0)
-    )
+    # e2e_delay_ms (total delay) 불러오기
+    df_all.get("total delay", 0)
 
     # 성공한 GSFC만 사용
     df_succ = df_all[df_all["is_succeed"] == True].copy()
@@ -424,7 +419,7 @@ def plot_e2e_vs_data_rate(df_succ, out_path="e2e_vs_data_rate_per_mode.png"):
         df_mode = df_succ[df_succ["mode"] == mode]
         # mode + data_rate_label 그룹으로 평균 E2E
         grp = (
-            df_mode.groupby("data_rate_label")["e2e_delay_ms"]
+            df_mode.groupby("data_rate_label")["total delay"]
             .mean()
             .reindex(labels)
         )
@@ -455,7 +450,7 @@ def plot_e2e_vs_mode(df_succ, out_dir="./", prefix="e2e_vs_mode_"):
     for data_rate_label, df_pair in df_succ.groupby("data_rate_label"):
         modes = sorted(df_pair["mode"].dropna().unique())
         avg_e2e = (
-            df_pair.groupby("mode")["e2e_delay_ms"]
+            df_pair.groupby("mode")["total delay"]
             .mean()
             .reindex(modes)
         )

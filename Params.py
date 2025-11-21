@@ -38,7 +38,7 @@ SFC_TOLERANCE_TIME = {
 #512 * 8 # [bit]
 
 # simulation
-NUM_ITERATIONS = 250 #400
+NUM_ITERATIONS = 500 #400
 NUM_GSFC = 3 #33 # int(2*1024*1024/SFC_SIZE*8) #[per ms]
 TAU = 1000 # 1ms 단위로 맞추기
 
