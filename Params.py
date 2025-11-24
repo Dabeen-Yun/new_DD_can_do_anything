@@ -27,7 +27,7 @@ SFC_TYPE_LIST = {
     1: ['2'], #uRLLC
     2: ['1', '2', '3', '4'], # 'mMTC'
 }
-VNF_SIZE = 1e6 # [bit]  ≈125 KB
+VNF_SIZE = 5e6 # [bit]  ≈125 KB
 SFC_TOLERANCE_TIME = {
     0: 100, # eMBB
     1: 50,  # uRLLC
@@ -38,8 +38,8 @@ SFC_TOLERANCE_TIME = {
 #512 * 8 # [bit]
 
 # simulation
-NUM_ITERATIONS = 300 #400
-NUM_GSFC = 5 #33 # int(2*1024*1024/SFC_SIZE*8) #[per ms]
+NUM_ITERATIONS = 100 #400
+NUM_GSFC = 1 #33 # int(2*1024*1024/SFC_SIZE*8) #[per ms]
 TAU = 1000 # 1ms 단위로 맞추기
 
 # VSG
@@ -52,7 +52,8 @@ TAU = 1000 # 1ms 단위로 맞추기
 # 6: egress
 VNF_TYPES_PER_VSG = (0, 7) #3
 
-NUM_VNFS_PER_SAT = 5 #10
+# TODO. 5개에서 3개로 축소
+NUM_VNFS_PER_SAT = 3 #10
 NUM_VNFS_PER_VSG = 2
 
 # satellite capacity

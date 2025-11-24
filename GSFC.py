@@ -606,7 +606,7 @@ class GSFC:
         best_full_path = None
         min_total_hops = float('inf')
 
-        remain_vnf_sequence = self.get_remain_vnf_sequence(all_sat_list, all_gserver_list)
+        remain_vnf_sequence = self.get_remain_vnf_sequence()
         if not remain_vnf_sequence:
             print(f"[ERROR] NO VSG LEFT. processed path: {self.satellite_path[:self.cur_path_id]}")
             return []
@@ -617,7 +617,6 @@ class GSFC:
             input()
         else:
             prev_path_id = max(self.cur_path_id - 1, 0) # 진행 전 -> idx 0, 진행 후 -> idx (self.cur_path_id - 1)
-            src_vsg_sat_ids = [self.satellite_path[prev_path_id][0]]
 
         dst_vsg_id = self.dst_vsg_id
         dst_vsg_sat_ids = [sat.id for sat in all_vsg_list[dst_vsg_id].satellites]
@@ -659,7 +658,12 @@ class GSFC:
             current_vnf_id = 0
 
             for i in range(len(path)):
-                if (i == (len(path) - 1)):
+                if (i == 0):
+                    if self.cur_path_id == 0:
+                        full_path.append([path[0], (f"src")])
+                    else:
+                        continue
+                elif (i == (len(path) - 1)):
                     if path[-2] != path[-1]:
                         segment = get_shortest_path(G, path[-2], path[-1])
                         if not segment:
@@ -683,7 +687,7 @@ class GSFC:
                                 for seg in segment[1:-1]:
                                     full_path.append([seg, (None)])
                     full_path.append([path[-1], ("dst")])
-                    full_vsg_path.append((self.dst_vsg_id, "src"))
+                    full_vsg_path.append((self.dst_vsg_id, "dst"))
                 else:
                     if path[i - 1] == path[i]:
                         vnf_sat_id = path[i]
@@ -741,31 +745,26 @@ class GSFC:
         self.vsg_path = best_full_vsg_path
         self.satellite_path = best_full_path
 
-    def get_remain_vnf_sequence(self, all_sat_list, all_gserver_list):
-        full_vnf_sequence = self.vnf_sequence
+    def get_remain_vnf_sequence(self):
+        remain_path = get_remain_path(self)
+        remain_vnf_sequence = []
 
-        processed_vnf_sequence = []
+        for hop in remain_path:
+            tag_raw = hop[1]
 
-        for node_id, vnf_info in self.satellite_path[:self.cur_path_id]:
-            if node_id < NUM_SATELLITES:
-                node = all_sat_list[node_id]
-                vsg_id = node.current_vsg_id
-            else:
-                node_id -= NUM_SATELLITES
-                node = all_gserver_list[node_id]
-                vsg_id = node.vsg_id
-
-            if vsg_id is None:
-                print("[Warn] Satellite does not belong to any VSG.")
+            if tag_raw is None:
                 continue
 
-            vnf_tag = get_vnf_id_for_list(vnf_info)
+            # 'vnf#' 형태에서 '#'만 추출하거나, 'src', 'dst'를 그대로 사용합니다.
+            if tag_raw.startswith('vnf'):
+                # 정규 표현식을 사용하여 'vnf' 뒤의 숫자(#)만 추출합니다.
+                result_tag = get_vnf_id_for_list(tag_raw)
+            else:
+                # 기타 예상치 못한 태그는 무시하거나 그대로 추가할 수 있으나, 여기서는 무시합니다.
+                continue
 
-            if vnf_tag:
-                processed_vnf_sequence.append(vnf_tag)
-
-        remain_start_id = len(processed_vnf_sequence)
-        remain_vnf_sequence = full_vnf_sequence[remain_start_id:]
+            # 결과 태그를 순서 보존 집합에 추가 (이미 존재하지 않는 경우에만 추가)
+            remain_vnf_sequence.append(result_tag)
         return remain_vnf_sequence
 
     def get_processed_vsg_path(self, all_gserver_list, all_sat_list):

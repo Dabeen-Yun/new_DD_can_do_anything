@@ -6,8 +6,10 @@ import random
 import math
 
 class VSG:
-    def __init__(self, id, center_coords, lon_min, lat_min, satellites, gserver):
+    def __init__(self, id, center_coords, lon_min, lat_min, satellites, gserver, mode, vsg_log_path):
         self.id = id
+        self.mode = mode
+        self.vsg_log_path = vsg_log_path
         self.assigned_vnfs = []
         self.satellites = satellites
         self.center_coords = center_coords  # lon, lat
@@ -16,6 +18,8 @@ class VSG:
         self.lat_min = lat_min
         self.lat_max = self.lat_min + LAT_STEP
         self.gserver = gserver
+
+        self.time = 0
 
     def update_satellite_in_vsg(self, all_sat_list):
         is_changed = False
@@ -111,7 +115,9 @@ class VSG:
 
         return lost_vnf_types
 
-    def time_tic(self, all_sat_list, all_gsfc_list):
+    def time_tic(self, all_sat_list, all_gsfc_list, cur_time):
+        self.time = cur_time
+
         is_inconsistent = False
         lost_vnfs = []
         is_changed = self.update_satellite_in_vsg(all_sat_list)
@@ -130,5 +136,7 @@ class VSG:
 
         if is_inconsistent:
             lost_vnfs = self.reassign_vnfs_to_satellite(all_gsfc_list)
+
+        write_vsg_csv_log(self)
 
         return lost_vnfs

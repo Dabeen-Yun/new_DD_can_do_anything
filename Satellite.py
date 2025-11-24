@@ -1,15 +1,17 @@
 from Params import *
+from Utility import *
+
 import numpy as np
 import math
-
-from Utility import get_remain_path
 
 d2r = np.deg2rad
 
 class Satellite:
-    def __init__(self, id, orb, spo, alt, phasing_inter_plane, inc_deg, sat_list):
+    def __init__(self, id, orb, spo, alt, phasing_inter_plane, sat_list, mode, sat_log_path):
         self.id = id
         self.sat_list = sat_list
+        self.mode = mode
+        self.sat_log_path = sat_log_path
 
         # 위치
         self.orb = orb  # P
@@ -207,3 +209,5 @@ class Satellite:
 
         # 위성 간 propagation delay 재계산
         self.get_propagation_delay()
+
+        write_sat_csv_log(self)

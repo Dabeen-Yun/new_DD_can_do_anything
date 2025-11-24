@@ -32,19 +32,21 @@ class Simulation:
         self.vsg_G = None
 
         self.gsfc_log_path = ""
+        self.sat_log_path = ""
+        self.vsg_log_path = ""
         self.test_gsfc_id = -1 # 경로 추적을 위한 GSFC ID 변수
 
         # video 관련 변수
         self.video_writer = None
-        self.video_path = "./results/plots/network_constellation.mp4"
+        self.video_path = ""
         self.video_fps = 10
 
-    def set_constellation(self):
+    def set_constellation(self, mode):
         phasing_inter_plane = 180 / NUM_ORBITS
 
         for sat_id in range(NUM_SATELLITES):
             sat = Satellite(sat_id, NUM_ORBITS, NUM_SATELLITES_PER_ORBIT, ORBIT_ALTITUDE, phasing_inter_plane,
-                            POLAR_LATITUDE, self.sat_list)
+                            self.sat_list, mode, self.sat_log_path)
             self.sat_list.append(sat)
 
         for sat_id in range(NUM_SATELLITES):
@@ -84,7 +86,7 @@ class Simulation:
 
         return distance_m
 
-    def initial_vsg_regions(self):
+    def initial_vsg_regions(self, mode):
         self.vsg_list = []
         self.gserver_list = []
         self.vsg_G = nx.Graph()
@@ -117,7 +119,7 @@ class Simulation:
 
                 ground_server = Gserver(gid, center_lon, center_lat, vid)
 
-                vsg = VSG(vid, (center_lon, center_lat), lon_min, lat_min, cell_sats, ground_server)
+                vsg = VSG(vid, (center_lon, center_lat), lon_min, lat_min, cell_sats, ground_server, mode, self.vsg_log_path)
                 for sat in cell_sats:
                     sat.current_vsg_id = vid
                     sat.vsg_enter_time = time()
@@ -164,12 +166,14 @@ class Simulation:
 
     def initial_vnfs_to_vsg(self):
         # NUM_SATELLITES는 self.sat_list의 길이 또는 전역 상수를 사용합니다.
-        vnf_set_sat_ids = sorted(random.sample(range(0,NUM_SATELLITES), int(NUM_SATELLITES*0.8)))
+        # TODO. 0.8에서 0.3으로 축소
+        vnf_set_sat_ids = sorted(random.sample(range(0,NUM_SATELLITES), int(NUM_SATELLITES*0.3)))
 
         for sat in self.sat_list:
             if sat.id in vnf_set_sat_ids:
                 # 3개 이상 탑재 (최대 개수는 넘기지 않도록)
-                vnf_per_sat = random.randint(3,NUM_VNFS_PER_SAT) # 흠...
+                # TODO. 최소 개수 3개에서 1개로 축소
+                vnf_per_sat = random.randint(1,NUM_VNFS_PER_SAT) # 흠...
                 vnfs = sorted(random.sample(range(*VNF_TYPES_PER_VSG), vnf_per_sat))
                 assigned_vnfs = [str(v) for v in vnfs]
                 sat.vnf_list = assigned_vnfs
@@ -201,7 +205,7 @@ class Simulation:
 
             print(f"  -> VSG {vsg.id} 내 할당 vnfs {vsg.assigned_vnfs}")
 
-    def compute_all_pair_distance(self):
+    def compute_all_pair_distance(self, csv_dir_path, mode):
         self.G = nx.Graph()
         # self.TG = nx.Graph()
 
@@ -231,6 +235,9 @@ class Simulation:
             else:
                 print(f"위성 {sample_sat_id}가 그래프에 존재하지 않습니다. (혼잡 상태 등으로 제외되었을 수 있음)")
             print("------------------------------------------")
+
+        graph_file_path = os.path.join(csv_dir_path, f"{mode}_network_G.pkl")
+        save_networkx_graph(self.G, graph_file_path)
 
     def generate_gsfc(self, new_gsfc_id_start, mode, num_gsfcs=None):
         if num_gsfcs is None:
@@ -474,13 +481,17 @@ class Simulation:
         plt.close(fig)
 
     def simulation_proceeding(self, mode, data_rate_pair, csv_dir_path):
-        # 1. 토폴로지 초기화
-        self.set_constellation()
-        self.initial_vsg_regions()
-        self.initial_vnfs_to_vsg()
-        self.compute_all_pair_distance()
-
         self.gsfc_log_path = init_gsfc_csv_log(csv_dir_path, mode)
+        self.sat_log_path = init_sat_csv_log(csv_dir_path, mode)
+        self.vsg_log_path = init_vsg_csv_log(csv_dir_path, mode)
+        self.video_path = os.path.join(csv_dir_path, f"{mode}_network_constellation.mp4")
+
+        # 1. 토폴로지 초기화
+        self.set_constellation(mode)
+        self.initial_vsg_regions(mode)
+        self.initial_vnfs_to_vsg()
+        self.compute_all_pair_distance(csv_dir_path, mode)
+
         # self.visualized_network_constellation(t=0)
 
         new_gsfc_id_start = 0
@@ -537,7 +548,7 @@ class Simulation:
 
             for vsg in self.vsg_list:
                 lost_vnf_type_list[vsg.id] = []
-                lost_vnf_types = vsg.time_tic(self.sat_list, self.gsfc_list)
+                lost_vnf_types = vsg.time_tic(self.sat_list, self.gsfc_list, t)
                 lost_vnf_type_list[vsg.id].extend(lost_vnf_types)
 
                 if lost_vnf_types:
