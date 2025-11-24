@@ -44,7 +44,7 @@ class GSFC:
         self.state = 1 # 1: process, 2: queue, 3: transmit, 4: propagate
         self.is_appended = False # sd 방식에서 경로 연장에 대한 변수
         self.DH_remaining_ongoing_time_slot = 0
-        self.current_remaining_vnf_process = 0
+        self.current_remaining_vnf_process = VNF_SIZE
 
         self.set_vnf_sizes()
 
@@ -339,99 +339,118 @@ class GSFC:
                 self.is_dropped = True
                 return []
 
-            if src_vsg != dst_vsg: # vsg 이동이 필요할 때만 진행
-                src_vsg_sat_ids = [sat.id for sat in all_vsg_list[src_vsg].satellites]
-                dst_vsg_sat_ids = [sat.id for sat in all_vsg_list[dst_vsg].satellites]
-                src_sat_id, dst_sat_id, src_dst_distance_m = get_src_dst_sat(src_vsg, dst_vsg, src_vsg_sat_ids, dst_vsg_sat_ids, all_vsg_list)
+            if "upgrade" in self.mode:
+                _, vnf_sat_id, dst_vnf_distance_m = get_src_dst_sat(src_vsg, dst_vsg, [prev_sat_id], candidate_vnf_sat_ids, all_vsg_list)
 
-                # prev_sat -> src_sat
-                if prev_sat_id != src_sat_id:
+                if prev_sat_id != vnf_sat_id:
                     try:
-                        sub_path = nx.shortest_path(G, source=prev_sat_id, target=src_sat_id)
+                        sub_path = nx.shortest_path(G, source=prev_sat_id, target=vnf_sat_id)
 
-                        for sid in sub_path[1:]:
-                            self.satellite_path.append([sid, None])
+                        if len(sub_path) > 2:
+                            for sid in sub_path[1:-1]:
+                                self.satellite_path.append([sid, None])
+                        self.satellite_path.append([vnf_sat_id, dst_vnf])
                     except nx.NetworkXNoPath:
                         print(f"[ERROR] 3-2 No TRAJECTORY SAT TO SAT")
                         self.is_dropped = True
                         return []
-
-                # src_sat_id -> dst_sat
-                if src_sat_id == dst_sat_id:  # 이동 X
-                    # SRC랑 DST는 다른 VSG 내에 있음.
-                    print(f"[WARN] src_sat_id is not in dst_vsg")
-                    input("ㅈ댔다!! src sat과 dst sat이 같은 vsg에 있을 리 없어~~~~~")
                 else:
-                    try:
-                        sub_path = nx.shortest_path(G, source=src_sat_id, target=dst_sat_id)
+                    self.satellite_path.append([vnf_sat_id, dst_vnf])
+            else:
 
-                        for sid in sub_path[1:]:
-                            self.satellite_path.append([sid, None])
+                if src_vsg != dst_vsg: # vsg 이동이 필요할 때만 진행
+                    src_vsg_sat_ids = [sat.id for sat in all_vsg_list[src_vsg].satellites]
+                    dst_vsg_sat_ids = [sat.id for sat in all_vsg_list[dst_vsg].satellites]
+                    src_sat_id, dst_sat_id, src_dst_distance_m = get_src_dst_sat(src_vsg, dst_vsg, src_vsg_sat_ids, dst_vsg_sat_ids, all_vsg_list)
+
+                    # prev_sat -> src_sat
+                    if prev_sat_id != src_sat_id:
+                        try:
+                            sub_path = nx.shortest_path(G, source=prev_sat_id, target=src_sat_id)
+
+                            for sid in sub_path[1:]:
+                                self.satellite_path.append([sid, None])
+                        except nx.NetworkXNoPath:
+                            print(f"[ERROR] 3-2 No TRAJECTORY SAT TO SAT")
+                            self.is_dropped = True
+                            return []
+
+                    # src_sat_id -> dst_sat
+                    if src_sat_id == dst_sat_id:  # 이동 X
+                        # SRC랑 DST는 다른 VSG 내에 있음.
+                        print(f"[WARN] src_sat_id is not in dst_vsg")
+                        input("src sat과 dst sat이 같은 vsg에 있을 리 없어~~~~~")
+                    else:
+                        try:
+                            sub_path = nx.shortest_path(G, source=src_sat_id, target=dst_sat_id)
+
+                            for sid in sub_path[1:]:
+                                self.satellite_path.append([sid, None])
+                        except nx.NetworkXNoPath:
+                            print(f"[ERROR] 3-2 No TRAJECTORY SAT TO SAT")
+                            self.is_dropped = True
+                            return []
+                else:
+                    dst_sat_id = prev_sat_id
+
+                # dst_sat -> vnf_sat
+                _, vnf_sat_id, dst_vnf_distance_m = get_src_dst_sat(dst_vsg, dst_vsg, [dst_sat_id], candidate_vnf_sat_ids, all_vsg_list)
+
+                if dst_sat_id != vnf_sat_id:
+                    # vnf_sat_avg_queue = mean([len(isl_k) for isl_k in all_sat_list[vnf_sat_id].queue_ISL])
+                    #
+                    # if vnf_sat_avg_queue > 200:
+                    #     # gserver까지 graph에 추가
+                    #     current_G = G
+                    #     selected_gserver_id = dst_vsg.gserver
+                    #     if selected_gserver_id is not None:
+                    #         current_G = create_temp_gserver_graph(G, all_gserver_list, all_vsg_list, selected_gserver_id)
+                    #         # gsfc에 처리 gserver 추가
+                    #         selected_gserver = all_gserver_list[selected_gserver_id]
+                    #         self.gserver = selected_gserver
+                    #
+                    #     # dst_sat -> vnf_g
+                    #     try:
+                    #         sub_path = nx.shortest_path(current_G, source=dst_sat_id, target=selected_gserver_id+NUM_SATELLITES)
+                    #
+                    #         if len(sub_path) > 2:
+                    #             for sid in sub_path[1:-1]:
+                    #                 self.satellite_path.append([sid, None])
+                    #         self.satellite_path.append([selected_gserver_id+NUM_SATELLITES, dst_vnf])
+                    #     except nx.NetworkXNoPath:
+                    #         print(f"[ERROR] 3-2 No TRAJECTORY SAT TO SAT")
+                    #         self.is_dropped = True
+                    #         return []
+                    #
+                    #     # vnf_g -> vnf_sat
+                    #     try:
+                    #         sub_path = nx.shortest_path(current_G, source=selected_gserver_id+NUM_SATELLITES, target=vnf_sat_id)
+                    #
+                    #         if len(sub_path) > 2:
+                    #             for sid in sub_path[1:-1]:
+                    #                 self.satellite_path.append([sid, None])
+                    #         if has_dst_tag(dst_vnf): # TODO. 이렇게 욱여막았지만.. 처리 필요
+                    #             self.satellite_path.append([vnf_sat_id, dst_vnf])
+                    #         else:
+                    #             self.satellite_path.append([vnf_sat_id, None])
+                    #     except nx.NetworkXNoPath:
+                    #         print(f"[ERROR] 3-2 No TRAJECTORY SAT TO SAT")
+                    #         self.is_dropped = True
+                    #         return []
+                    # else:
+                    try:
+                        sub_path = nx.shortest_path(G, source=dst_sat_id, target=vnf_sat_id)
+
+                        if len(sub_path) > 2:
+                            for sid in sub_path[1:-1]:
+                                self.satellite_path.append([sid, None])
+                        self.satellite_path.append([vnf_sat_id, dst_vnf])
                     except nx.NetworkXNoPath:
                         print(f"[ERROR] 3-2 No TRAJECTORY SAT TO SAT")
                         self.is_dropped = True
                         return []
-            else:
-                dst_sat_id = prev_sat_id
-
-            # dst_sat -> vnf_sat
-            _, vnf_sat_id, dst_vnf_distance_m = get_src_dst_sat(dst_vsg, dst_vsg, [dst_sat_id], candidate_vnf_sat_ids, all_vsg_list)
-
-            if dst_sat_id != vnf_sat_id:
-                # vnf_sat_avg_queue = mean([len(isl_k) for isl_k in all_sat_list[vnf_sat_id].queue_ISL])
-                #
-                # if vnf_sat_avg_queue > 200:
-                #     # gserver까지 graph에 추가
-                #     current_G = G
-                #     selected_gserver_id = dst_vsg.gserver
-                #     if selected_gserver_id is not None:
-                #         current_G = create_temp_gserver_graph(G, all_gserver_list, all_vsg_list, selected_gserver_id)
-                #         # gsfc에 처리 gserver 추가
-                #         selected_gserver = all_gserver_list[selected_gserver_id]
-                #         self.gserver = selected_gserver
-                #
-                #     # dst_sat -> vnf_g
-                #     try:
-                #         sub_path = nx.shortest_path(current_G, source=dst_sat_id, target=selected_gserver_id+NUM_SATELLITES)
-                #
-                #         if len(sub_path) > 2:
-                #             for sid in sub_path[1:-1]:
-                #                 self.satellite_path.append([sid, None])
-                #         self.satellite_path.append([selected_gserver_id+NUM_SATELLITES, dst_vnf])
-                #     except nx.NetworkXNoPath:
-                #         print(f"[ERROR] 3-2 No TRAJECTORY SAT TO SAT")
-                #         self.is_dropped = True
-                #         return []
-                #
-                #     # vnf_g -> vnf_sat
-                #     try:
-                #         sub_path = nx.shortest_path(current_G, source=selected_gserver_id+NUM_SATELLITES, target=vnf_sat_id)
-                #
-                #         if len(sub_path) > 2:
-                #             for sid in sub_path[1:-1]:
-                #                 self.satellite_path.append([sid, None])
-                #         if has_dst_tag(dst_vnf): # TODO. 이렇게 욱여막았지만.. 처리 필요
-                #             self.satellite_path.append([vnf_sat_id, dst_vnf])
-                #         else:
-                #             self.satellite_path.append([vnf_sat_id, None])
-                #     except nx.NetworkXNoPath:
-                #         print(f"[ERROR] 3-2 No TRAJECTORY SAT TO SAT")
-                #         self.is_dropped = True
-                #         return []
-                # else:
-                try:
-                    sub_path = nx.shortest_path(G, source=dst_sat_id, target=vnf_sat_id)
-
-                    if len(sub_path) > 2:
-                        for sid in sub_path[1:-1]:
-                            self.satellite_path.append([sid, None])
+                else:
                     self.satellite_path.append([vnf_sat_id, dst_vnf])
-                except nx.NetworkXNoPath:
-                    print(f"[ERROR] 3-2 No TRAJECTORY SAT TO SAT")
-                    self.is_dropped = True
-                    return []
-            else:
-                self.satellite_path.append([vnf_sat_id, dst_vnf])
 
             self.cur_vsg_path_id += 1
 
@@ -670,6 +689,8 @@ class GSFC:
                         vnf_sat_id = path[i]
                         full_path.append([path[i], (f"vnf{self.vnf_sequence[current_vnf_id]}")])
 
+                        if vnf_sat_id >= NUM_SATELLITES:
+                            input(f"vnf out of index: {vnf_sat_id}")
                         vnf_sat = all_sat_list[vnf_sat_id]
                         full_vsg_path.append((vnf_sat.current_vsg_id, f"vnf{self.vnf_sequence[current_vnf_id]}"))
 
@@ -855,14 +876,13 @@ class GSFC:
             sat_processing_rate = data_rate_pair[0]
             gserver_processing_rate = data_rate_pair[1]
 
+        num_computing_gsfc = max(len(node.process_queue), 1)
         if node_type == 'satellite':
-            num_computing_gsfc = max(len(node.process_queue), 1)
             current_timeslot_capa = sat_processing_rate / num_computing_gsfc
-            self.current_remaining_vnf_process -= current_timeslot_capa
         elif node_type == 'gserver':
-            num_computing_gsfc = max(len(node.process_queue), 1)
             current_timeslot_capa = gserver_processing_rate / num_computing_gsfc
-            self.current_remaining_vnf_process -= current_timeslot_capa
+        # TODO. current_remaining_vnf_process 업데이트 하는 곳이 없음 (계속 0)
+        self.current_remaining_vnf_process -= current_timeslot_capa
         estimated_remain_proc_delay = math.ceil(self.current_remaining_vnf_process / current_timeslot_capa)
         # 이 gsfc가 이번 time slot에서 끝나면 0, 아니면 estimated_remain_proc_delay 반환
         if self.current_remaining_vnf_process > 0:
@@ -952,7 +972,7 @@ class GSFC:
                 self.is_succeed = True
                 write_gsfc_csv_log(self.gsfc_log_path, t, self, "DONE")
             else:  # 처리 다 했는데? dst 안 거침????? 이새키 뭐야
-                if self.mode == 'sd':  # sd 원래 다음 vsg까지의 경로만을 만듦 => 다음 vsg까지의 경로 생성
+                if 'sd' in self.mode:  # sd 원래 다음 vsg까지의 경로만을 만듦 => 다음 vsg까지의 경로 생성
                     self.set_sd_satellite_path(all_vsg_list, all_gserver_list, all_sat_list, G, vsg_G)
                     self.cur_path_id -= 1
                     self.state = 1
@@ -960,7 +980,7 @@ class GSFC:
                 else:  # 얘네는 안됨!!!!!! 다 처리했어야함!!!!
                     self.is_dropped = True
                     write_gsfc_csv_log(self.gsfc_log_path, t, self, "DROP")
-                    input("ㅈ댔다!! 경로가 끝났을 리 없어~~~~~")
+                    input("경로가 끝났을 리 없어~~~~~")
 
         is_done = True if (self.is_succeed or self.is_dropped) else False
         return is_done
@@ -978,14 +998,21 @@ class GSFC:
                 cur_node_id, cur_vnf_tag = self.satellite_path[self.cur_path_id]
                 cur_node_type, cur_node = get_node_type(cur_node_id, all_gserver_list, all_sat_list)
 
-                if (not has_vnf_tag(cur_vnf_tag)) or self.is_appended: # vnf 처리 필요 여부 파악
+                need_to_process = has_vnf_tag(cur_vnf_tag) and not self.is_appended
+
+                if not need_to_process: # vnf 처리 필요 여부 파악
                     estimated_remain_proc_delay = 0
                     self.is_appended = False
                 else:
+                    cur_node.append_process_queue(self)
                     estimated_remain_proc_delay = self.DH_accumulate_proc_delay(cur_node, cur_node_type, data_rate_pair)
                 write_gsfc_csv_log(self.gsfc_log_path, t, self, "PROCESS")
 
                 if estimated_remain_proc_delay <= 1: # process 종료
+                    if need_to_process:
+                        cur_node.remove_process_queue(self)
+
+                    self.current_remaining_vnf_process = VNF_SIZE
                     self.cur_path_id += 1
                     if len(self.satellite_path) == self.cur_path_id:
                         return 0
@@ -1100,4 +1127,4 @@ class GSFC:
                     self.DH_accumulate_proc_delay(next_node, next_node_type, data_rate_pair)
                 self.DH_remaining_ongoing_time_slot -= 1
             else:
-                input("ㅈ댔다!! state가 4보다 클 순 없어~~~~~")
+                input("state가 4보다 클 순 없어~~~~~")

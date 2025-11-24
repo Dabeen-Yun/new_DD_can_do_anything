@@ -168,6 +168,24 @@ class Satellite:
             if idx == next_node_id:
                 return i
 
+    def append_process_queue(self, gsfc):
+        is_duplicate = any(
+            item[0] == gsfc.id and item[1] == gsfc.vnf_id
+            for item in self.process_queue
+        )
+
+        if not is_duplicate:
+            self.process_queue.append([gsfc.id, gsfc.vnf_id, gsfc.vnf_sizes[gsfc.vnf_id]])
+
+    def remove_process_queue(self, gsfc):
+        target_gsfc_id = gsfc.id
+
+        self.process_queue = [
+            item for item in self.process_queue if item[0] != target_gsfc_id
+        ]
+
+        gsfc.vnf_id += 1
+
     def time_tic(self, delta_time=1):  # 1ms 마다
         self.time += delta_time
 

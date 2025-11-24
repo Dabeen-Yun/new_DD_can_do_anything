@@ -12,6 +12,7 @@ from time import time
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 from matplotlib.patches import Rectangle
+import cv2
 
 
 d2r = np.deg2rad
@@ -31,8 +32,12 @@ class Simulation:
         self.vsg_G = None
 
         self.gsfc_log_path = ""
-
         self.test_gsfc_id = -1 # 경로 추적을 위한 GSFC ID 변수
+
+        # video 관련 변수
+        self.video_writer = None
+        self.video_path = "./results/plots/network_constellation.mp4"
+        self.video_fps = 10
 
     def set_constellation(self):
         phasing_inter_plane = 180 / NUM_ORBITS
@@ -291,14 +296,15 @@ class Simulation:
         cmap = cm.get_cmap('tab20', len(self.vsg_list))
         vsg_colors = {vsg.id: cmap(vsg.id) for vsg in self.vsg_list}
 
-        plt.figure(figsize=(24, 12))
+        fig = plt.figure(figsize=(24, 12))
+        ax = plt.gca()
 
         # 0. VSG 영역 표현
         for vsg in self.vsg_list:
             rect = Rectangle((vsg.lon_min, vsg.lat_min), LON_STEP, LAT_STEP,
                              linewidth=0.8, edgecolor=vsg_colors[vsg.id], facecolor=vsg_colors[vsg.id],
                              alpha=0.4, zorder=0)
-            plt.gca().add_patch(rect)
+            ax.add_patch(rect)
 
             if len(vsg.assigned_vnfs) > 1:
                 plt.annotate(f"VNF {vsg.assigned_vnfs}", (vsg.lon_min+1, vsg.lat_min+1), fontsize=13, color='black',
@@ -310,28 +316,26 @@ class Simulation:
                 if nbr_id == -1 or nbr_id >= len(self.sat_list):
                     continue
                 nbr_sat = self.sat_list[nbr_id]
-                plt.plot([sat.lon, nbr_sat.lon], [sat.lat, nbr_sat.lat],
+                ax.plot([sat.lon, nbr_sat.lon], [sat.lat, nbr_sat.lat],
                          color='gray', linewidth=1.0, alpha=0.3, zorder=1)
 
         # 2. VSG 영역 위성 산점도
         for vsg in self.vsg_list:
             for sat in vsg.satellites:
-                edge = 'black'
-                lw = 0.8
-                plt.scatter(sat.lon, sat.lat, s=100, color=vsg_colors[vsg.id], edgecolors=edge, linewidths=lw,
+                ax.scatter(sat.lon, sat.lat, s=100, color=vsg_colors[vsg.id], edgecolors='black', linewidths=0.8,
                             alpha=0.6, zorder=2)
 
         # 3. VNF 수행 위성 강조
         for sat in self.sat_list:
             if sat.vnf_list:
-                plt.scatter(sat.lon, sat.lat, marker='*', s=80, color='red', edgecolors='black', linewidths=0.8,
+                ax.scatter(sat.lon, sat.lat, marker='*', s=80, color='red', edgecolors='black', linewidths=0.8,
                             zorder=4)
-                plt.annotate(f"VNF {sat.vnf_list}", (sat.lon + 3.0, sat.lat + 2.0), fontsize=13, color='darkred',
+                ax.annotate(f"VNF {sat.vnf_list}", (sat.lon + 3.0, sat.lat + 2.0), fontsize=13, color='darkred',
                              alpha=0.8, zorder=12)
 
         # 4. 위성 인덱스 모두 표시
         for sat in self.sat_list:
-            plt.annotate(str(sat.id), (sat.lon, sat.lat), fontsize=13, alpha=0.7, zorder=5)
+            ax.annotate(str(sat.id), (sat.lon, sat.lat), fontsize=13, alpha=0.7, zorder=5)
 
         # 경로 추적
         if self.test_gsfc_id != -1:
@@ -340,8 +344,9 @@ class Simulation:
                 gsfc_to_track = next(gsfc for gsfc in self.gsfc_list if gsfc.id == self.test_gsfc_id)
 
                 # 2. 현재 경로 데이터 가져오기
-                processed_path = gsfc_to_track.processed_satellite_path # 이미 지나간 경로 (초록색)
-                remain_path = get_remain_path(gsfc_to_track) # 앞으로 갈 경로 (빨간색)
+                cur_path_idx = gsfc_to_track.cur_path_id
+                processed_path = gsfc_to_track.satellite_path[:cur_path_idx] # 이미 지나간 경로 (초록색)
+                remain_path = gsfc_to_track.satellite_path[cur_path_idx:] # 앞으로 갈 경로 (빨간색)
 
                 # ----------------------------------------------------------------------
                 # 3. 엣지 및 노드 추출
@@ -360,7 +365,6 @@ class Simulation:
                     # 첫 번째 홉의 시작 위성은 G/S 또는 이전 위성 목록에서 시작되므로,
                     # processed_path의 시작점에서부터 엣지를 추출합니다.
                     prev_sat_id = processed_path[0][0]
-
                     for sat_id, _ in processed_path[1:]:  # 첫 위성 다음부터 순회
                         if sat_id != prev_sat_id:
                             processed_edges.append((prev_sat_id, sat_id))
@@ -370,26 +374,20 @@ class Simulation:
                 # B. Remaining Path (빨간색) 엣지 추출
                 # --------------------------------------------------
                 if remain_path:
-
                     # 1. 시작 위성 결정 (연결을 위한 이전 위성)
                     if processed_path:
                         # Processed Path가 있다면, 마지막 위성이 다음 홉의 출발점
                         prev_sat_id = processed_path[-1][0]
-
                         # 2. [핵심 수정] Processed Path와 Remain Path 연결 엣지 (빨간색)
                         # processed_path의 마지막 위성 -> remain_path의 첫 위성
                         current_sat_id = remain_path[0][0]
-
                         if current_sat_id != prev_sat_id:
                             # 이 엣지는 이제부터 '남은 경로'의 첫 엣지입니다.
                             remaining_edges.append((prev_sat_id, current_sat_id))
-
                         # 다음 루프를 위해 prev_sat_id를 remain_path의 첫 위성으로 업데이트
                         prev_sat_id = current_sat_id
-
                         # 루프 시작: remain_path[1:]부터 시작
                         start_index = 1
-
                     else:
                         # Processed Path가 없다면 (경로 시작점), remain_path[0]부터 시작
                         prev_sat_id = remain_path[0][0]
@@ -416,7 +414,7 @@ class Simulation:
                                        nodelist=all_tracked_sat_ids,
                                        node_color='gray',  # 기본 색상 (아래에서 덧그립니다)
                                        node_size=150,
-                                       ax=plt.gca(),)
+                                       ax=ax,)
 
                 # 4-2. Processed Path 엣지 (초록색)
                 nx.draw_networkx_edges(self.G,
@@ -424,7 +422,7 @@ class Simulation:
                                        edgelist=processed_edges,
                                        edge_color='green',
                                        width=2.5,
-                                       ax=plt.gca(),)
+                                       ax=ax,)
 
                 # 4-3. Remaining Path 엣지 (빨간색)
                 nx.draw_networkx_edges(self.G,
@@ -432,7 +430,7 @@ class Simulation:
                                        edgelist=remaining_edges,
                                        edge_color='red',
                                        width=2.5,
-                                       ax=plt.gca(),)
+                                       ax=ax,)
 
                 # 4-4. 현재 위치 위성 강조 (Processed Path의 마지막 위성)
                 if processed_path:
@@ -442,7 +440,7 @@ class Simulation:
                                            nodelist=[current_sat_id],
                                            node_color='yellow',  # 현재 위치는 노란색으로 강조
                                            node_size=200,
-                                           ax=plt.gca(),)
+                                           ax=ax,)
             except StopIteration:
                 # GSFC가 아직 생성되지 않았거나 ID가 잘못된 경우
                 pass
@@ -453,8 +451,27 @@ class Simulation:
         plt.grid(True)
         plt.legend(loc='upper left')
         plt.tight_layout()
-        # plt.savefig(filename, dpi=300)
-        plt.show()
+
+        fig.canvas.draw()
+
+        width, height = fig.canvas.get_width_height()
+        img = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
+        img = img.reshape((height, width, 3))
+
+        # VideoWriter 초기화 (첫 프레임에서)
+        if self.video_writer is None:
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            self.video_writer = cv2.VideoWriter(
+                self.video_path, fourcc,
+                self.video_fps,
+                (width, height)
+            )
+
+        # OpenCV는 BGR이라 변환 후 write
+        frame_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+        self.video_writer.write(frame_bgr)
+
+        plt.close(fig)
 
     def simulation_proceeding(self, mode, data_rate_pair, csv_dir_path):
         # 1. 토폴로지 초기화
@@ -484,7 +501,7 @@ class Simulation:
                     gsfc.set_vsg_path(self.vsg_G)
                     if mode == "basic":
                         gsfc.set_basic_satellite_path(self.vsg_list, self.G)
-                    elif mode == "sd":
+                    elif "sd" in mode:
                         gsfc.set_sd_satellite_path(self.vsg_list, self.gserver_list, self.sat_list, self.G, self.vsg_G)
                     else:
                         print("\n")
@@ -536,3 +553,9 @@ class Simulation:
             # self.visualized_network_constellation(t)
 
             t += 1
+
+        # 루프가 끝나고 나서
+        if self.video_writer is not None:
+            self.video_writer.release()
+            self.video_writer = None
+            print(f"[INFO] Saved video to {self.video_path}")

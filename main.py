@@ -4,11 +4,12 @@ from Simulation import *
 from Utility import *
 
 class Main:
-    data_rate_pairs = [  # [sat, gs] 단위 bps
-        (40e6, 400e6),  # A 10배
-        # (80e6, 320e6),  # B 10배
+    data_rate_pairs = [  # [sat, gs] 단위 bps 1e6
+        (40e3, 400e3),  # A 10배
+        (80e3, 320e3),  # B 10배
+        (100e3, 300e3),
         # (160e6, 640e6),  # C 10배
-        (320e6, 1280e6)
+        # (320e3, 1280e3)
     ]
 
     modes = ['basic', 'sd']  # dd, basic, sd

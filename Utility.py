@@ -446,29 +446,82 @@ def plot_e2e_vs_mode(df_succ, out_dir="./", prefix="e2e_vs_mode_"):
 
     os.makedirs(out_dir, exist_ok=True)
 
+    delay_components = [
+        "process delay",
+        "queueing delay",
+        "transmitting delay",
+        "propagation delay",
+    ]
+
     # data_rate_label 단위로 loop
     for data_rate_label, df_pair in df_succ.groupby("data_rate_label"):
-        modes = sorted(df_pair["mode"].dropna().unique())
-        avg_e2e = (
-            df_pair.groupby("mode")["total delay"]
-            .mean()
-            .reindex(modes)
-        )
+        df_agg = df_pair.groupby("mode")[delay_components].mean()
+
+        modes = sorted(df_agg.index.tolist())
+        df_agg = df_agg.reindex(modes)
+
+        # 데이터가 비어있으면 건너뜁니다.
+        if df_agg.empty:
+            print(f"[WARN] No aggregated data for data_rate_label {data_rate_label}")
+            continue
 
         x = np.arange(len(modes))
 
-        plt.figure()
-        plt.bar(x, avg_e2e.values)
-        plt.xticks(x, modes)
-        plt.ylabel("Average E2E delay [ms]")
-        plt.title(f"E2E delay by mode (data_rate={data_rate_label})")
-        plt.grid(True, axis="y")
+        bottom_df = df_agg.iloc[:, :-1].cumsum(axis=1)
+        zeros = pd.DataFrame(0, index=df_agg.index, columns=[f"bottom_0"])
+        bottom_df = pd.concat([zeros, bottom_df], axis=1)
+
+        plt.figure(figsize=(8, 6))
+        current_bottom = np.zeros(len(modes))
+        bar_containers = {}
+
+        for i, component in enumerate(delay_components):
+            # i번째 컴포넌트의 평균 지연 값 (Numpy Array)
+            delay_values = df_agg[component].values
+
+            # bar를 그리고, 그 결과를 저장하여 나중에 주석(Annotation)에 사용
+            bars = plt.bar(
+                x,
+                delay_values,
+                label=component.replace(' delay', '').title(),  # 범례를 위해 텍스트 수정
+                bottom=current_bottom
+            )
+            bar_containers[component] = bars
+
+            # 다음 막대를 위해 현재 막대 높이를 current_bottom에 더합니다 (누적)
+            current_bottom += delay_values
+
+        def autolabel_stack(bars, segment_vals, current_bottom_vals):
+            for bar, val, bottom_start in zip(bars, segment_vals, current_bottom_vals):
+                if val > 0.1:  # 값이 너무 작으면 생략
+                    y_center = bottom_start + val / 2.0
+                    plt.text(bar.get_x() + bar.get_width() / 2.0, y_center,
+                             f"{val:.1f}", ha="center", va="center", fontsize=8)
+
+        current_bottom_annotation = np.zeros(len(modes))
+
+        for i, component in enumerate(delay_components):
+            delay_values = df_agg[component].values
+            bars = bar_containers[component]
+
+            # 주석 헬퍼 함수 호출
+            autolabel_stack(bars, delay_values, current_bottom_annotation)
+
+            # 다음 주석을 위해 누적 합 업데이트
+            current_bottom_annotation += delay_values
+
+        plt.xticks(x, modes, rotation=0)
+        plt.ylabel("Average E2E Delay [ms]")
+        plt.title(f"Average E2E Delay Breakdown by Mode (data_rate={data_rate_label})")
+        plt.legend(loc='upper left', bbox_to_anchor=(1.05, 1))
+        plt.grid(True, axis="y", linestyle='--', alpha=0.6)
         plt.tight_layout()
 
         filename = f"{prefix}{data_rate_label}.png"
         out_path = os.path.join(out_dir, filename)
+
         plt.savefig(out_path, dpi=300)
-        # plt.show()
+        plt.close()  # 메모리 관리를 위해 플롯 닫기
         print(f"[INFO] Saved {out_path}")
 
 def plot_e2e_summary(modes, data_rate_pairs, base_results_dir="./results"):
@@ -487,7 +540,7 @@ def plot_e2e_summary(modes, data_rate_pairs, base_results_dir="./results"):
         return
 
     # out_dir은 결과 위치 통일해서 관리
-    out_dir = os.path.join(base_results_dir, str(NUM_GSFC), "plots")
+    out_dir = os.path.join(base_results_dir, "plots")
     os.makedirs(out_dir, exist_ok=True)
 
     # 1) [모드별] data_rate_pair 비교
