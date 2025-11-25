@@ -11,6 +11,7 @@ from matplotlib.patches import Rectangle
 import cv2
 import matplotlib.pyplot as plt
 import pickle
+import ast
 
 # 해당 vnf tag가 'vnf#'인지 확인
 def has_vnf_tag(x):
@@ -754,10 +755,24 @@ def load_data_for_time_tick(t, mode, csv_dir_path):
 
     return gsfc_dict, sat_list_dict, vsg_list_dict
 
+def safe_load_path(raw):
+    if isinstance(raw, list):
+        return raw
+    if isinstance(raw, str):
+        raw = raw.strip()
+        if raw == "" or raw == "[]":
+            return []
+        try:
+            return json.loads(raw)
+        except:
+            print("[WARN] json.loads 실패 → 빈 리스트 반환", raw)
+            return []
+    return []
+
 def animate_one_gsfc(gsfc_id, modes, csv_dir_path):
     for mode in modes:
         video_writer = None
-        video_fps = 10
+        video_fps = 30
         video_path = os.path.join(csv_dir_path, f"{mode}_gsfc{gsfc_id}_network_constellation.mp4")
 
         graph_file_path = os.path.join(csv_dir_path, f"{mode}_network_G.pkl")
@@ -795,7 +810,7 @@ def animate_one_gsfc(gsfc_id, modes, csv_dir_path):
                 ax.add_patch(rect)
 
                 if vsg['assigned vnfs'] and len(vsg['assigned vnfs']) > 1:
-                    plt.annotate(f"VNF {vsg['assigned vnfs']}", (vsg['lon min'] + 1, vsg['lat min'] + 1),
+                    ax.annotate(f"VNF {vsg['assigned vnfs']}", (vsg['lon min'] + 1, vsg['lat min'] + 1),
                                  fontsize=13, color='black', alpha=0.8, zorder=12)
 
             # 1. ISL (adjacency edge) 그리기
@@ -831,83 +846,78 @@ def animate_one_gsfc(gsfc_id, modes, csv_dir_path):
                     ax.annotate(f"VNF {sat['vnf list']}", (sat['lon'] + 3.0, sat['lat'] + 2.0),
                                 fontsize=13, color='darkred', alpha=0.8, zorder=12)
 
-            # if gsfc_record:
-            #     # 1. GSFC 경로 데이터 로드
-            #     satellite_path = gsfc_record.get('satellite_path')
-            #     cur_path_idx = gsfc_record.get('processed_satellite_path', [])
-            #
-            #     # 'processed_satellite_path' 컬럼이 실제 지나온 경로를 담고 있다고 가정
-            #     processed_path = gsfc_record.get('processed_satellite_path', [])
-            #
-            #     # 전체 경로에서 processed_path를 제외한 나머지 경로
-            #     # satellite_path가 전체 경로이고 processed_path가 지나온 경로라면,
-            #     # remaining_path를 계산하기 위해 인덱스를 사용해야 합니다.
-            #
-            #     # CSV 저장 방식에 따라 처리 방식이 달라짐.
-            #     # (A) 전체 경로와 현재 인덱스가 저장된 경우
-            #     # (B) 지나온 경로와 전체 경로가 분리되어 저장된 경우
-            #
-            #     # 여기서는 'processed_satellite_path'가 `gsfc.satellite_path[:gsfc.cur_path_id]`로 저장되었으므로,
-            #     # 전체 경로와 cur_path_id를 사용합니다.
-            #
-            #     if isinstance(satellite_path, list) and isinstance(processed_path, list):
-            #         # 전체 경로에서 processed_path의 길이만큼이 지나갔다고 가정
-            #         cur_path_len = len(processed_path)
-            #
-            #         processed_path_ids = satellite_path[:cur_path_len]
-            #         remain_path_ids = satellite_path[cur_path_len:]
-            #
-            #         processed_edges = []
-            #         remaining_edges = []
-            #
-            #         processed_sat_ids = sat_ids(processed_path_ids)
-            #         remaining_sat_ids = sat_ids(remain_path_ids)
-            #         all_tracked_sat_ids = list(set(processed_sat_ids + remaining_sat_ids))
-            #
-            #         # A. Processed Path 엣지 추출
-            #         if len(processed_path_ids) >= 2:
-            #             for i in range(len(processed_path_ids) - 1):
-            #                 prev_sat_id = processed_path_ids[i][0]
-            #                 current_sat_id = processed_path_ids[i + 1][0]
-            #                 if current_sat_id != prev_sat_id:
-            #                     processed_edges.append((prev_sat_id, current_sat_id))
-            #
-            #         # B. Remaining Path 엣지 추출
-            #         if remain_path_ids:
-            #             # Processed Path와 Remain Path 연결 엣지
-            #             if processed_path_ids:
-            #                 last_processed_sat_id = processed_path_ids[-1][0]
-            #                 first_remaining_sat_id = remain_path_ids[0][0]
-            #                 if last_processed_sat_id != first_remaining_sat_id:
-            #                     remaining_edges.append((last_processed_sat_id, first_remaining_sat_id))
-            #
-            #             # 나머지 Remaining Path 엣지
-            #             if len(remain_path_ids) >= 2:
-            #                 for i in range(len(remain_path_ids) - 1):
-            #                     prev_sat_id = remain_path_ids[i][0]
-            #                     current_sat_id = remain_path_ids[i + 1][0]
-            #                     if current_sat_id != prev_sat_id:
-            #                         remaining_edges.append((prev_sat_id, current_sat_id))
-            #
-            #         # 하이라이팅 시각화 (NetworkX G를 사용)
-            #
-            #         # 4-1. 노드 하이라이팅 (전체 경로 노드)
-            #         nx.draw_networkx_nodes(G, pos=sat_positions, nodelist=all_tracked_sat_ids,
-            #                                node_color='gray', node_size=150, ax=ax)
-            #
-            #         # 4-2. Processed Path 엣지 (초록색)
-            #         nx.draw_networkx_edges(G, pos=sat_positions, edgelist=processed_edges,
-            #                                edge_color='green', width=2.5, ax=ax)
-            #
-            #         # 4-3. Remaining Path 엣지 (빨간색)
-            #         nx.draw_networkx_edges(G, pos=sat_positions, edgelist=remaining_edges,
-            #                                edge_color='red', width=2.5, ax=ax)
-            #
-            #         # 4-4. 현재 위치 위성 강조
-            #         if processed_path_ids:
-            #             current_sat_id = processed_path_ids[-1][0]
-            #             nx.draw_networkx_nodes(G, pos=sat_positions, nodelist=[current_sat_id],
-            #                                    node_color='yellow', node_size=200, ax=ax)
+            if gsfc_record:
+                satellite_path = safe_load_path(gsfc_record.get('satellite_path', []))
+                processed_path = safe_load_path(gsfc_record.get('processed_satellite_path', []))
+
+                # 전체 경로에서 processed_path를 제외한 나머지 경로
+                # satellite_path가 전체 경로이고 processed_path가 지나온 경로라면,
+                # remaining_path를 계산하기 위해 인덱스를 사용해야 합니다.
+
+                # CSV 저장 방식에 따라 처리 방식이 달라짐.
+                # (A) 전체 경로와 현재 인덱스가 저장된 경우
+                # (B) 지나온 경로와 전체 경로가 분리되어 저장된 경우
+
+                # 여기서는 'processed_satellite_path'가 `gsfc.satellite_path[:gsfc.cur_path_id]`로 저장되었으므로,
+                # 전체 경로와 cur_path_id를 사용합니다.
+                if isinstance(satellite_path, list) or isinstance(processed_path, list):
+                    # 전체 경로에서 processed_path의 길이만큼이 지나갔다고 가정
+                    cur_path_len = len(processed_path)
+
+                    processed_path_ids = satellite_path[:cur_path_len]
+                    remain_path_ids = satellite_path[cur_path_len:]
+
+                    processed_edges = []
+                    remaining_edges = []
+
+                    processed_sat_ids = sat_ids(processed_path_ids)
+                    remaining_sat_ids = sat_ids(remain_path_ids)
+                    all_tracked_sat_ids = list(set(processed_sat_ids + remaining_sat_ids))
+
+                    # A. Processed Path 엣지 추출
+                    if len(processed_path_ids) >= 2:
+                        for i in range(len(processed_path_ids) - 1):
+                            prev_sat_id = processed_path_ids[i][0]
+                            current_sat_id = processed_path_ids[i + 1][0]
+                            if current_sat_id != prev_sat_id:
+                                processed_edges.append((prev_sat_id, current_sat_id))
+
+                    # B. Remaining Path 엣지 추출
+                    if remain_path_ids:
+                        # Processed Path와 Remain Path 연결 엣지
+                        if processed_path_ids:
+                            last_processed_sat_id = processed_path_ids[-1][0]
+                            first_remaining_sat_id = remain_path_ids[0][0]
+                            if last_processed_sat_id != first_remaining_sat_id:
+                                remaining_edges.append((last_processed_sat_id, first_remaining_sat_id))
+
+                        # 나머지 Remaining Path 엣지
+                        if len(remain_path_ids) >= 2:
+                            for i in range(len(remain_path_ids) - 1):
+                                prev_sat_id = remain_path_ids[i][0]
+                                current_sat_id = remain_path_ids[i + 1][0]
+                                if current_sat_id != prev_sat_id:
+                                    remaining_edges.append((prev_sat_id, current_sat_id))
+
+                    # 하이라이팅 시각화 (NetworkX G를 사용)
+
+                    # 4-1. 노드 하이라이팅 (전체 경로 노드)
+                    nx.draw_networkx_nodes(G, pos=sat_positions, nodelist=all_tracked_sat_ids,
+                                           node_color='gray', node_size=150, ax=ax)
+
+                    # 4-2. Processed Path 엣지 (초록색)
+                    nx.draw_networkx_edges(G, pos=sat_positions, edgelist=processed_edges,
+                                           edge_color='green', width=2.5, ax=ax)
+
+                    # 4-3. Remaining Path 엣지 (빨간색)
+                    nx.draw_networkx_edges(G, pos=sat_positions, edgelist=remaining_edges,
+                                           edge_color='red', width=2.5, ax=ax)
+
+                    # 4-4. 현재 위치 위성 강조
+                    if processed_path_ids:
+                        current_sat_id = processed_path_ids[-1][0]
+                        nx.draw_networkx_nodes(G, pos=sat_positions, nodelist=[current_sat_id],
+                                               node_color='yellow', node_size=200, ax=ax)
 
             plt.xlabel("Longitude")
             plt.ylabel("Latitude")

@@ -189,9 +189,9 @@ class Satellite:
         gsfc.vnf_id += 1
 
     def time_tic(self, delta_time=1):  # 1ms 마다
-        self.time += delta_time
+        self.time = delta_time
 
-        orbital_period_ms = SATELLITE_ORBITAL_PERIOD #* 1000  # sec->ms 변환
+        orbital_period_ms = SATELLITE_ORBITAL_PERIOD * 1000  # sec->ms 변환
 
         # 궤도 주기 계산 (초당 360도 회전)
         mean_motion_deg_per_ms = 360 / orbital_period_ms
