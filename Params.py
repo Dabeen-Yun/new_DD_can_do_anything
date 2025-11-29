@@ -10,7 +10,7 @@ NUM_SATELLITES_PER_ORBIT = NUM_SATELLITES // NUM_ORBITS
 SATELLITE_SPEED = 7.4 #km/s 27000 km/h
 DEGREE_TO_KM = 111 # 6378 지구 반지름에 따른 위도 1도 거리
 LAT_RANGE = [-90, 90]
-LON_RANGE = [0, 360]
+LON_RANGE = [-180, 180]
 
 LAT_STEP = 60
 LON_STEP = 72
@@ -27,6 +27,7 @@ SFC_TYPE_LIST = {
     1: ['2'], #uRLLC
     2: ['1', '2', '3', '4'], # 'mMTC'
 }
+
 VNF_SIZE = 5e6 # [bit]  ≈125 KB
 SFC_TOLERANCE_TIME = {
     0: 100, # eMBB
@@ -38,7 +39,7 @@ SFC_TOLERANCE_TIME = {
 #512 * 8 # [bit]
 
 # simulation
-NUM_ITERATIONS = 102 #400
+NUM_ITERATIONS = 100 #400
 NUM_GSFC = 1 #33 # int(2*1024*1024/SFC_SIZE*8) #[per ms]
 TAU = 1000 # 1ms 단위로 맞추기
 
@@ -52,8 +53,7 @@ TAU = 1000 # 1ms 단위로 맞추기
 # 6: egress
 VNF_TYPES_PER_VSG = (0, 7) #3
 
-# TODO. 5개에서 3개로 축소
-NUM_VNFS_PER_SAT = 3 #10
+NUM_VNFS_PER_SAT = 1 #10
 NUM_VNFS_PER_VSG = 2
 
 # satellite capacity
@@ -69,3 +69,40 @@ GSERVER_LINK_CAPACITY = 500 * 1e6 # [bps]
 # GSERVER_PROCESSING_RATE: 200 MB/S -> 200 * 8 Mbps = 1600 Mbps
 GSERVER_PROCESSING_RATE = 1600 * 1e6 # [bps]
 GSERVER_NUM_PROCESS_VNF = 4 # 동시에 처리 가능한 VNF 수
+
+
+# 실제 위경도 좌표 사용 (Latitude: -90~90, Longitude: -180~180 변환 필요)
+# 0~360 Longitude를 쓰신다면 -180~180으로 변환하는 로직을 추가하거나 데이터를 0~360으로 맞추면 됩니다.
+MAJOR_HUBS = [
+    # (Lat, Lon, Type, Radius_km)
+    (37.5665, 126.9780, "Urban_eMBB", 50),   # Seoul
+    (35.6762, 139.6503, "Urban_eMBB", 60),   # Tokyo
+    (40.7128, -74.0060, "Urban_eMBB", 60),   # New York
+    (51.5074, -0.1278,  "Urban_eMBB", 50),   # London
+    (31.2304, 121.4737, "Urban_URLLC", 40),  # Shanghai (Port + City)
+    (1.3521, 103.8198,  "Urban_URLLC", 30),  # Singapore (Port + City)
+    (51.9244, 4.4777,   "Urban_URLLC", 20),  # Rotterdam (Major Port)
+    (25.0478, 55.1732,  "Urban_URLLC", 20),  # Jebel Ali (Dubai Port)
+]
+
+# --- [NEW] VNF Chain Definitions (서베이 기반) ---
+SFC_EMBB_SEQ = ["Firewall", "DPI", "NAT"]         # 고처리량, 보안, 주소변환
+SFC_URLLC_SEQ = ["Firewall", "Load_Balancer"]     # 저지연, 경로 최적화
+SFC_MMTC_SEQ = ["IoT_Gateway", "DPI"]             # 대규모 연결 관리
+
+# eMBB 파라미터
+EMBB_ARRIVAL_RATE = 1800    # packets per second (Lambda)
+EMBB_LATENCY_LIMIT = 4      # ms
+EMBB_PACKET_MIN_SIZE = 50   # bytes
+EMBB_PACKET_MAX_SIZE = 600  # bytes
+EMBB_PARETO_SHAPE = 1.5     # Pareto shape parameter (일반적인 인터넷 트래픽)
+
+# URLLC 파라미터
+URLLC_PERIOD = 2          # ms (Arrival interval)
+URLLC_LATENCY_LIMIT = 1   # ms (0.5 ~ 1ms)
+URLLC_PACKET_SIZE = 32    # bytes (Fixed)
+
+# mMTC 파라미터
+MMTC_PACKET_SIZE = 100 # bytes
+MMTC_LATENCY_LIMIT = 10000 # ms (10 seconds - Delay Tolerant)
+MMTC_DENSITY_FACTOR = 0.5 # 배경 트래픽 밀도 조절용 상수

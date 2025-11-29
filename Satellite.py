@@ -5,6 +5,7 @@ import numpy as np
 import math
 
 d2r = np.deg2rad
+r2d = np.rad2deg
 
 class Satellite:
     def __init__(self, id, orb, spo, alt, phasing_inter_plane, sat_list, mode, sat_log_path):
@@ -18,17 +19,29 @@ class Satellite:
         self.spo = spo  # S
         self.sat = orb * spo  # t = P * S
         self.x = self.id // self.spo  # plane index
-        self.y = self.id % self.spo  # slot index
-        self.lat = 0  # grid latitude [0~360]
-        self.lon = 0
+        self.y = self.id % self.spo  # slot index (궤도 내 몇 번째 위성인지)
         self.alt = alt
+        self.radius = R_EARTH_RADIUS + alt # 지구 반지름 + 고도
 
-        self.phasing_offset_deg = lambda y: (360 * CONSTELLATION_PARAM_F * self.y) / self.sat
-        self.orbit_spacing_deg = 360 / self.orb
-        self.phasing_inter_plane = phasing_inter_plane
+        # RAAN (Right Ascension of the Ascending Node): 궤도면의 회전 각도
+        # Walker Star는 180도 범위 내에 궤도면을 배치합니다. (입력받은 phasing_inter_plane 사용)
+        self.raan = d2r(self.x * phasing_inter_plane)
 
-        self.phasing_intra_plane = 360 / self.spo
-        self.phasing_adjacent_plane = CONSTELLATION_PARAM_F * 360 / self.sat
+        # 초기 위상 (Mean Anomaly): 궤도 내 위성의 시작 위치
+        # 360도를 위성 수(spo)로 나눈 간격
+        self.initial_phase = d2r(self.y * (360.0 / self.spo))
+
+        # 경사각 (Inclination): Walker Star(Polar)는 90도에 가까움
+        # 정확히 90도면 atan2 계산 시 특이점이 생길 수 있어 86.4~89도 추천 (Iridium: 86.4)
+        self.inclination = d2r(86.4)
+
+        # 궤도 속도 (Mean Motion) 계산
+        mu = 3.986004418e5 # 지구 중력 상수
+        self.mean_motion = math.sqrt(mu / self.radius ** 3)
+
+        # 위치 (Lat: -90~90, Lon: -180~180)
+        self.lat = 0
+        self.lon = 0
 
         # 시간 [ms]
         self.time = 0
@@ -59,35 +72,83 @@ class Satellite:
                           self.queue_ISL_inter_1, self.queue_ISL_inter_2]
         self.queue_TSL = []
 
-        self.set_lla()
+        self.update_coordinates(0)
 
-    # walker-star constellation
-    def set_lla(self):
-        self.lon = (self.x * self.orbit_spacing_deg + self.phasing_offset_deg(self.y)) % 360
+    def update_coordinates(self, time_ms):
+        """
+        3차원 궤도 회전을 통해 위경도를 계산합니다.
+        이 함수를 사용하면 경도가 -180~180 범위로 자동 계산됩니다.
+        """
+        t_s = time_ms / 1000.0  # ms -> sec
 
-        phase = (2 * np.pi * self.y) / self.spo
-        self.lat = 90 * np.sin(phase)  # POLAR_LATITUDE * np.sin(phase)
+        # 1. 현재 궤도 내 각도 (Mean Anomaly)
+        current_angle = self.initial_phase + (self.mean_motion * t_s)
+
+        # 2. 궤도 평면상 좌표 (2D)
+        x_orb = self.radius * math.cos(current_angle)
+        y_orb = self.radius * math.sin(current_angle)
+
+        # 3. 3차원 회전 (ECI 좌표계 변환)
+        # Z축(RAAN) -> X축(Inclination) 회전 적용
+        cos_om = math.cos(self.raan)
+        sin_om = math.sin(self.raan)
+        cos_i = math.cos(self.inclination)
+        sin_i = math.sin(self.inclination)
+
+        x_eci = x_orb * cos_om - y_orb * cos_i * sin_om
+        y_eci = x_orb * sin_om + y_orb * cos_i * cos_om
+        z_eci = y_orb * sin_i
+
+        # 4. 지구 자전 고려 (ECEF 좌표계 변환)
+        # 지구가 도는 속도(WE)만큼 보정
+        we = 7.2921151467e-5  # rad/s
+        theta_g = we * t_s
+
+        x_ecef = x_eci * math.cos(theta_g) + y_eci * math.sin(theta_g)
+        y_ecef = -x_eci * math.sin(theta_g) + y_eci * math.cos(theta_g)
+        z_ecef = z_eci
+
+        # 5. 위경도 변환 (핵심: atan2 사용으로 -180~180 범위 확보)
+        self.lat = r2d(math.asin(z_ecef / self.radius))  # -90 ~ 90
+        self.lon = r2d(math.atan2(y_ecef, x_ecef))  # -180 ~ 180
 
     def set_adjacent_node(self):
         # horizontal adjacent node
-        h_adj_1 = self.id + self.spo
-        h_adj_2 = self.id - self.spo
-        if h_adj_1 >= self.sat:
-            h_adj_1 = h_adj_1 % self.sat
-        if h_adj_2 < 0:
-            h_adj_2 = self.sat + h_adj_2
+        # 오른쪽 이웃 (East)
+        if self.x == self.orb - 1:
+            h_adj_1 = -1
+        else:
+            h_adj_1 = self.id + self.spo
+
+        # 왼쪽 이웃 (West)
+        if self.x == 0:
+            h_adj_2 = -1
+        else:
+            h_adj_2 = self.id - self.spo
+
         self.adj_sat_index_list[2] = h_adj_1
         self.adj_sat_index_list[3] = h_adj_2
-        self.inter_ISL_list.append(h_adj_1)
-        self.inter_ISL_list.append(h_adj_2)
+
+        # ISL 리스트에도 유효한 위성만 추가
+        if h_adj_1 != -1:
+            self.inter_ISL_list.append(h_adj_1)
+        if h_adj_2 != -1:
+            self.inter_ISL_list.append(h_adj_2)
 
         # vertical adjacent node
         v_adj_1 = self.id + 1
         v_adj_2 = self.id - 1
-        if self.id // self.spo != v_adj_1 // self.spo:
-            v_adj_1 -= self.spo
-        if self.id // self.spo != v_adj_2 // self.spo:
-            v_adj_2 += self.spo
+        # 궤도면(x)이 바뀌지 않도록 모듈러 연산 처리
+        # (현재 궤도면의 시작 ID와 끝 ID 범위를 벗어나면 순환)
+        plane_start_id = self.x * self.spo
+        plane_end_id = plane_start_id + self.spo - 1
+
+        if v_adj_1 > plane_end_id:
+            v_adj_1 = plane_start_id
+
+        if v_adj_2 < plane_start_id:
+            v_adj_2 = plane_end_id
+
         self.adj_sat_index_list[0] = v_adj_1
         self.adj_sat_index_list[1] = v_adj_2
         self.intra_ISL_list.append(v_adj_1)
@@ -191,21 +252,7 @@ class Satellite:
     def time_tic(self, delta_time=1):  # 1ms 마다
         self.time = delta_time
 
-        orbital_period_ms = SATELLITE_ORBITAL_PERIOD * 1000  # sec->ms 변환
-
-        # 궤도 주기 계산 (초당 360도 회전)
-        mean_motion_deg_per_ms = 360 / orbital_period_ms
-
-        # 위성의 초기 위상 차이 (경도 기준)
-        init_lon = (self.x * self.orbit_spacing_deg + self.phasing_offset_deg(self.y)) % 360
-
-        # 시간에 따라 경도 업데이트
-        self.lon = (init_lon + mean_motion_deg_per_ms * self.time) % 360
-
-        # 위도는 경사 궤도를 따라 sin 형태로 주기적 움직임
-        # 전체 궤도 주기 90분 기준으로 위도 변화 (위상은 y에 따라 달라짐)
-        phase = 2 * np.pi * self.y / self.spo
-        self.lat = 90 * np.sin(2 * np.pi * self.time / orbital_period_ms + phase)
+        self.update_coordinates(self.time)
 
         # 위성 간 propagation delay 재계산
         self.get_propagation_delay()

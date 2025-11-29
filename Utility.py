@@ -12,6 +12,40 @@ import cv2
 import matplotlib.pyplot as plt
 import pickle
 import ast
+import math
+
+def get_vsg_id_from_coords(lat, lon):
+    """
+    위경도 좌표를 입력받아 해당 위치의 VSG ID를 반환 (O(1))
+    """
+    # 범위 벗어나는 경우 예외 처리 (Clamp)
+    lat = max(min(lat, LAT_RANGE[1]), LAT_RANGE[0])
+
+    # 경도 순환 고려 (-180 ~ 180)
+    # 만약 lon이 180.1 처럼 경계값을 살짝 넘으면 -179.9로 보정하거나,
+    # 단순히 범위 내로 clamp 할 수도 있습니다. 여기선 Clamp로 처리합니다.
+    lon = max(min(lon, LON_RANGE[1]), LON_RANGE[0])
+
+    # 행(Row), 열(Col) 인덱스 계산
+    # int()를 취해 소수점을 버리면 해당 그리드 인덱스가 됨
+    lat_idx = int((lat - LAT_RANGE[0]) / LAT_STEP)
+    lon_idx = int((lon - LON_RANGE[0]) / LON_STEP)
+
+    # 전체 열 개수 (가로로 VSG가 몇 개 있는지)
+    num_cols = math.ceil((LON_RANGE[1] - LON_RANGE[0]) / LON_STEP)
+    num_rows = math.ceil((LAT_RANGE[1] - LAT_RANGE[0]) / LAT_STEP)
+
+    # 경계값(최대값) 처리: 예) 위도가 정확히 90도일 경우 인덱스가 넘어가므로 보정
+    if lat_idx >= num_rows:
+        lat_idx = num_rows - 1
+    if lon_idx >= num_cols:
+        lon_idx = num_cols - 1
+
+    # VSG ID 계산 (initial_vsg_regions의 생성 순서가 Lat(행) -> Lon(열) 순서라고 가정)
+    # vid = 행_인덱스 * 열_개수 + 열_인덱스
+    vsg_id = lat_idx * num_cols + lon_idx
+
+    return vsg_id
 
 # 해당 vnf tag가 'vnf#'인지 확인
 def has_vnf_tag(x):
@@ -248,7 +282,8 @@ GSFC_LOG_HEADER = [
     "queueing delay",
     "transmitting delay",
     "propagation delay",
-    "total delay"
+    "total delay",
+    "additional_path"
 ]
 
 def init_gsfc_csv_log(csv_dir_path, mode):
@@ -295,18 +330,116 @@ def write_gsfc_csv_log(file_path, time_ms, gsfc, event):
         to_str(getattr(gsfc, "state", -1)),
         to_str(getattr(gsfc, "DH_remaining_ongoing_time_slot", -1)),
         to_str(getattr(gsfc, "proc_delay_ms", 0)),
-        to_str(getattr(gsfc, "queue_delay_ms", 0)),
+        # to_str(getattr(gsfc, "queue_delay_ms", 0)),
+        to_str(getattr(gsfc, "proc_queue_delay_ms", 0)),
         to_str(getattr(gsfc, "trans_delay_ms", 0)),
         to_str(getattr(gsfc, "prop_delay_ms", 0)),
         to_str(getattr(gsfc, "proc_delay_ms", 0) +
+               getattr(gsfc, "proc_queue_delay_ms", 0) +
                getattr(gsfc, "queue_delay_ms", 0) +
                getattr(gsfc, "trans_delay_ms", 0) +
-               getattr(gsfc, "prop_delay_ms", 0))
+               getattr(gsfc, "prop_delay_ms", 0)),
+        getattr(gsfc, "additional_path", 0)
     ]
 
     with open(file_path, "a", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow(row)
+
+    setattr(gsfc, "additional_path", 0)
+
+def calculate_additional_path_stats(file_path):
+    if not os.path.exists(file_path):
+        print(f"오류: 파일을 찾을 수 없습니다 - {file_path}")
+        return
+
+    try:
+        df = pd.read_csv(file_path)
+        df['additional_path'] = pd.to_numeric(df['additional_path'], errors='coerce').fillna(0)
+
+        # 총량 계산 (합계)
+        total_additional_path = df['additional_path'].sum()
+
+        # 평균 계산 (결측값 제외 후 평균)
+        # 전체 행에 대한 평균
+        average_additional_path = df['additional_path'].mean()
+
+        print(f"--- CSV 파일 분석 결과: {file_path} ---")
+        print(f"전체 레코드 수: {len(df)}")
+        print(f"'additional_path' 총량 (합계): {total_additional_path}")
+        print(f"'additional_path' 평균: {average_additional_path:.4f}")
+
+    except Exception as e:
+        print(f"파일 처리 중 오류 발생: {e}")
+
+def calculate_success_hop_stats(file_path):
+    if not os.path.exists(file_path):
+        print(f"오류: 파일을 찾을 수 없습니다 - {file_path}")
+        return
+
+    try:
+        df = pd.read_csv(file_path)
+
+        # is_succeed 컬럼을 bool로 정규화
+        succeed_col = df['is_succeed']
+
+        if succeed_col.dtype == bool:
+            success_df = df[df['is_succeed']]
+        else:
+            # 문자열/숫자 형태인 경우 ('True', 'False', 1, 0 등)
+            success_df = df[succeed_col.astype(str).str.lower().isin(['true', '1', 'yes'])]
+
+        total_hop_count = 0
+
+        if success_df.empty:
+            print(f"--- CSV 파일 분석 결과: {file_path} ---")
+            print("성공한(success=True) GSFC가 없습니다.")
+            return
+
+        def count_hops(path_val):
+            # 결측 처리
+            if pd.isna(path_val):
+                return 0
+
+            # CSV 읽어오면 보통 문자열이므로 literal_eval로 파싱
+            if isinstance(path_val, str):
+                try:
+                    parsed = ast.literal_eval(path_val)
+                except Exception:
+                    # 파싱 실패하면 0으로 처리
+                    return 0
+            else:
+                parsed = path_val
+
+            # 우리가 기대하는 형태: [[38, "src"], [27, "vnf1"], ...]
+            if isinstance(parsed, list):
+                return len(parsed)  # 요소 개수 = hop count (노드 개수 기준)
+                # 만약 링크 개수 기준 hop 을 원하면 len(parsed) - 1 로 바꾸면 됨
+
+            return 0
+
+        # hop_count 컬럼 추가
+        success_df = success_df.copy()
+        success_df['hop_count'] = success_df['satellite_path'].apply(count_hops)
+        total_hop_count += success_df['hop_count']
+
+        total_hops = success_df['hop_count'].sum()
+        avg_hops = success_df['hop_count'].mean()
+        max_hops = success_df['hop_count'].max()
+        min_hops = success_df['hop_count'].min()
+
+        print(f"--- CSV 파일 분석 결과 (success == True): {file_path} ---")
+        print(f"성공한 GSFC 레코드 수: {len(success_df)}")
+        print(f"총 hop 수 합계: {total_hops}")
+        print(f"평균 hop 수: {avg_hops:.4f}")
+        print(f"최소 hop 수: {min_hops}")
+        print(f"최대 hop 수: {max_hops}")
+
+        # 필요하면 개별 hop_count 분포를 보고 싶을 때:
+        # print(success_df[['gsfc_id', 'satellite_path', 'hop_count']].head())
+
+    except Exception as e:
+        print(f"파일 처리 중 오류 발생: {e}")
 
 SATELLITE_LOG_HEADER = [
     "time_ms",
@@ -657,14 +790,14 @@ def plot_e2e_summary(modes, data_rate_pairs, base_results_dir="./results"):
     # 1) [모드별] data_rate_pair 비교
     plot_e2e_vs_data_rate(
         df_succ,
-        out_path=os.path.join(out_dir, "e2e_vs_data_rate_per_mode.png"),
+        out_path=os.path.join(out_dir, "test_e2e_vs_data_rate_per_mode.png"),
     )
 
     # 2) [data_rate_pair별] mode 비교
     plot_e2e_vs_mode(
         df_succ,
         out_dir=out_dir,
-        prefix="e2e_vs_mode_",
+        prefix="test_e2e_vs_mode_",
     )
 
 # 파싱 헬퍼 함수 (CSV의 문자열을 리스트/딕셔너리로 변환)

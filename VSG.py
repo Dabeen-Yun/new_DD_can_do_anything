@@ -54,7 +54,7 @@ class VSG:
             # ----------------------------------------------------------------------
             capacity_candidate = []
             for sat in self.satellites:
-                # 1. VNF 최대 개수(3) 미만인 위성
+                # 1. VNF 최대 개수(1) 미만인 위성
                 if len(sat.vnf_list) < NUM_VNFS_PER_SAT:
                     capacity_candidate.append(sat)
 
@@ -68,32 +68,64 @@ class VSG:
             # ----------------------------------------------------------------------
             # 🎯 [우선 순위 2]: VNF 슬롯이 가득 찼거나 없으므로, 로드 밸런싱을 통해 할당
             # ----------------------------------------------------------------------
-            # VSG 내 모든 위성 중 가장 로드가 적은 위성을 찾습니다.
-            min_overall_load = float('inf')
+            # # 1. random 방식
+            # best_sat = None
+            # best_vnf_kind_in_sat = None
+            #
+            # candidates = []  # (sat, vnf_kind) 튜플 저장
+            #
+            # for sat in self.satellites:
+            #     vnf_loads_dict = get_satellite_load(sat, all_gsfc_list)
+            #
+            #     for vnf_kind in vnf_loads_dict.keys():
+            #         # 2. 현재 VSG에 이미 할당된 VNF는 제외
+            #         if vnf_kind in self.assigned_vnfs:
+            #             continue
+            #
+            #         candidates.append((sat, vnf_kind))
+            #
+            # if candidates:
+            #     best_sat, best_vnf_kind_in_sat = random.choice(candidates)
+            # else:
+            #     pass
+
+            # 2. 잔류시간만 고려
+            max_time_entered = 0
             best_sat = None
             best_vnf_kind_in_sat = None
 
             for sat in self.satellites:
-                # 2-1. 위성(sat)의 VNF 종류별 로드 딕셔너리를 가져옵니다.
                 vnf_loads_dict = get_satellite_load(sat, all_gsfc_list)
 
-                # 2-2. 해당 위성 내에서 VSG에 할당되지 않은 VNF 중 최소 로드를 찾기
-                min_vnf_load_in_sat = float('inf')
-                min_vnf_kind_in_sat = None
-
                 for vnf_kind, load in vnf_loads_dict.items():
-                    # VSG에 할당된 VNF는 무시하고 (nothing), 할당되지 않은 VNF만 검사
                     if vnf_kind not in self.assigned_vnfs:
-                        if load < min_vnf_load_in_sat:
-                            min_vnf_load_in_sat = load
-                            min_vnf_kind_in_sat = vnf_kind
+                        time_entered = sat.vsg_enter_time
 
-                # 2-4. 전 VSG를 통틀어 가장 적은 큐 로드를 가진 쌍을 갱신
-                # (min_vnf_load_in_sat는 VSG에 할당되지 않은 VNF 중 최소 로드임)
-                if min_vnf_load_in_sat < min_overall_load:
-                    min_overall_load = min_vnf_load_in_sat
-                    best_sat = sat
-                    best_vnf_kind_in_sat = min_vnf_kind_in_sat
+                        if time_entered > max_time_entered:
+                            best_sat = sat
+                            best_vnf_kind_in_sat = vnf_kind
+                            max_time_entered = time_entered
+
+
+            # # 3. queue 상태 + 잔류 시간
+            # best_sat = None
+            # best_vnf_kind_in_sat = None
+            # best_efficiency = -1
+            # alpha = 0.5
+            #
+            # for sat in self.satellites:
+            #     max_time_entered = sat.vsg_enter_time
+            #
+            #     # 2-1. 위성(sat)의 VNF 종류별 로드 딕셔너리를 가져옵니다.
+            #     vnf_loads_dict = get_satellite_load(sat, all_gsfc_list)
+            #
+            #     for vnf_kind, load in vnf_loads_dict.items():
+            #         # VSG에 할당된 VNF는 무시하고 (nothing), 할당되지 않은 VNF만 검사
+            #         if vnf_kind not in self.assigned_vnfs:
+            #             efficiency = alpha * max_time_entered - (1 - alpha) * load # 클 수록 좋음 (늦게 들어옴), load는 작을 수록 좋음
+            #             if efficiency > best_efficiency:
+            #                 best_sat = sat
+            #                 best_efficiency = efficiency
 
             # 3. 할당 가능한 위성이 있는지 확인
             if best_sat is None:
@@ -108,8 +140,8 @@ class VSG:
 
             # 5. 재할당 정보 출력 # TODO. 남의꺼 뺏을 때만 로그 찍히게 --> 왜 detour 안되는지 확인
             print(f"[REASSIGN] VNF **{vnf}** assigned to Sat **{selected_sat.id}** in VSG **{self.id}**.")
-            print(
-                f"           Selection Criterion: Found minimum queue process (Load: **{min_overall_load:.2f}** bytes) across the VSG.")
+            # print(
+            #     f"           Selection Criterion: Found minimum queue process (Load: **{min_overall_load:.2f}** bytes) across the VSG.")
             print(
                 f"           The least loaded VNF Queue was **{best_vnf_kind_in_sat}** on Sat **{selected_sat.id}** (Filtering out VSG {self.id}'s assigned VNFs).")
 

@@ -3,9 +3,12 @@ from Params import *
 from Simulation import *
 from Utility import *
 
-# 실행 프롬프트 main - NUM_ITERATIONS 101, NUM_GSFC 1, VNF 개수 줄여서 'dd', 'basic', 'sd' 기법 실행
-# 실행 프롬프트 basic - NUM_ITERATIONS 3, NUM_GSFC 1, data_rate_pairs (251e3, 251e3), animation 확인 용
-# 실행 프롬프트 segmental Dijkstra - NUM_ITERATIONS 102, NUM_GSFC 1, data_rate_pairs (252e3, 252e3), VNF 개수 줄여서 'dd', 'basic', 'sd' 기법 실행, satellite 이동성 ms 로 변환
+# 실행 프롬프트 main - NUM_ITERATIONS 100, NUM_GSFC 1, 'dd', 'basic' 이동성으로 인한 추가 경로 확인
+# 실행 프롬프트 basic - NUM_ITERATIONS 100, NUM_GSFC 1, 'dd', 'basic' 이동성 X
+# 실행 프롬프트 segmental Dijkstra - NUM_ITERATIONS 100, NUM_GSFC 1, 'dd', 'basic' vnf 재할당 방식 확인
+
+# TODO. vnf는 위성에 탑재되는 것, gsfc는 vnf 탑재가 아니라 vnf 수행이 필요 -> processing rate에서는 vnf size가 아니라 해당 패킷 사이즈가 필요
+
 
 class Main:
     data_rate_pairs = [  # [sat, gs] 단위 bps 1e6
@@ -13,7 +16,7 @@ class Main:
         # (2500, 250e3),
         # (250e2, 250e3),
         # (40e3, 100e3), # 100Mbps
-        (252e3, 252e3), # 250Mbps
+        (250e3, 250e3), # 250Mbps
         # (40e3, 400e3),  # A 10배
         # (80e3, 320e3),  # B 10배
         # (100e3, 300e3),
@@ -21,24 +24,25 @@ class Main:
         # (320e3, 1280e3)
     ]
 
-    modes = ['dd', 'basic', 'sd']  # dd, basic, sd, upgrade_sd
+    modes = ['basic']  # dd, basic, sd, upgrade_sd
 
     for pair in tqdm(data_rate_pairs):
         for mode in modes:
-            csv_dir_path = f"./results/{NUM_GSFC*NUM_ITERATIONS}/{mode}/{pair[0] / 1e6}sat_{pair[1] / 1e6}gs/"
+            csv_dir_path = f"./test_results/{NUM_GSFC*NUM_ITERATIONS}/{mode}/{pair[0] / 1e6}sat_{pair[1] / 1e6}gs/"
 
             simulation = Simulation()
             simulation.simulation_proceeding(mode, pair, csv_dir_path)
 
     for pair in tqdm(data_rate_pairs):
         for mode in modes:
-            csv_dir_path = f"./results/{NUM_GSFC * NUM_ITERATIONS}/{mode}/{pair[0] / 1e6}sat_{pair[1] / 1e6}gs/"
-
-            animate_one_gsfc(0, modes, csv_dir_path)
+            csv_dir_path = f"./test_results/{NUM_GSFC * NUM_ITERATIONS}/{mode}/{pair[0] / 1e6}sat_{pair[1] / 1e6}gs/{mode}_gsfc_log.csv"
+            calculate_additional_path_stats(csv_dir_path)
+            calculate_success_hop_stats(csv_dir_path)
+            # animate_one_gsfc(0, modes, csv_dir_path)
 
     # 시뮬 다 돌리고 나서 한 번만 호출
     plot_e2e_summary(
         modes=modes,
         data_rate_pairs=data_rate_pairs,
-        base_results_dir="./results",
+        base_results_dir="./test_results",
     )
