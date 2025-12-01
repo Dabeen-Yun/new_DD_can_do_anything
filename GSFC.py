@@ -44,6 +44,7 @@ class GSFC:
         self.is_dropped = False
         self.is_succeed = False
         self.additional_path = 0
+        self.delay_per_vsg = {}
 
         self.estimated_remain_proc_delay = 0
         self.state = 1 # 1: process, 2: queue, 3: transmit, 4: propagate
@@ -99,7 +100,7 @@ class GSFC:
 
         self.gsfc_flow_rule.append(("dst", self.dst_vsg_id))
 
-    def set_vsg_path(self, vsg_G):
+    def set_vsg_path(self, all_vsg_list, vsg_G):
         essential_vsgs = self.gsfc_flow_rule
 
         items = list(essential_vsgs)
@@ -108,26 +109,17 @@ class GSFC:
             return []
 
         for i in range(n - 1):
-            (src_vnf, src_vsg) = items[i]
-            (dst_vnf, dst_vsg) = items[i + 1]
-
-        #     try:
-        #         sub_path = nx.shortest_path(vsg_G, source=src_vsg, target=dst_vsg)
-        #     except nx.NetworkXNoPath:
-        #         print(f"[ERROR] 2-1 No path between VSG {src_vsg} and {dst_vsg}")
-        #         self.is_dropped = True
-        #         return []
+            (src_vnf, src_vsg_id) = items[i]
+            (dst_vnf, dst_vsg_id) = items[i + 1]
 
             # 1) 첫 구간이면 시작 VSG + vnf 태그 저장
             if i == 0:
-                self.vsg_path.append((src_vsg, src_vnf))
-
-        #     # 2) 중간 VSG들 (None 태그)
-        #     for vid in sub_path[1:-1]:
-        #         self.vsg_path.append((vid, None))
+                self.vsg_path.append((src_vsg_id, src_vnf))
+                src_vsg = all_vsg_list[src_vsg_id]
 
             # 3) 도착 VSG + vnf 태그 저장
-            self.vsg_path.append((dst_vsg, dst_vnf))
+            self.vsg_path.append((dst_vsg_id, dst_vnf))
+            dst_vsg = all_vsg_list[dst_vsg_id]
 
     def set_basic_satellite_path(self, all_vsg_list, G):
         prev_sat_id = -1
@@ -136,7 +128,6 @@ class GSFC:
             print(f"[ERROR] No VSG path in GSFC {self.id}")
             return []
 
-        # todo. 필수 vsg만 골라서 satellite 경로 설정
         for i in range(len_vsg_path - 1):
             src_vsg, src_vnf = self.vsg_path[i]
             dst_vsg, dst_vnf = self.vsg_path[i + 1]
@@ -199,13 +190,13 @@ class GSFC:
                     self.is_dropped = True
                     return []
 
-        print(f"\n========== INITIAL BASIC GSFC {self.id} ==========")
-        print(f"  -> src {self.src_vsg_id}")
-        print(f"  -> dst {self.dst_vsg_id}")
-        print(f"  -> vnf sequence {self.vnf_sequence}")
-        print(f"  -> flow rule {self.gsfc_flow_rule}")
-        print(f"  -> vsg path {self.vsg_path}")
-        print(f"  -> satellite path {self.satellite_path}")
+        # print(f"\n========== INITIAL BASIC GSFC {self.id} ==========")
+        # print(f"  -> src {self.src_vsg_id}")
+        # print(f"  -> dst {self.dst_vsg_id}")
+        # print(f"  -> vnf sequence {self.vnf_sequence}")
+        # print(f"  -> flow rule {self.gsfc_flow_rule}")
+        # print(f"  -> vsg path {self.vsg_path}")
+        # print(f"  -> satellite path {self.satellite_path}")
 
     def update_basic_satellite_path(self, all_vsg_list, all_gserver_list, all_sat_list, G):
         if len(self.satellite_path) < 1:
@@ -599,12 +590,12 @@ class GSFC:
         self.vsg_path = best_full_vsg_path
         self.satellite_path = best_full_path
 
-        print(f"\n========== INITIAL DD GSFC {self.id} ==========")
-        print(f"  -> src {self.src_vsg_id}")
-        print(f"  -> dst {self.dst_vsg_id}")
-        print(f"  -> vnf sequence {self.vnf_sequence}")
-        print(f"  -> vsg path {self.vsg_path}")
-        print(f"  -> satellite path {self.satellite_path}")
+        # print(f"\n========== INITIAL DD GSFC {self.id} ==========")
+        # print(f"  -> src {self.src_vsg_id}")
+        # print(f"  -> dst {self.dst_vsg_id}")
+        # print(f"  -> vnf sequence {self.vnf_sequence}")
+        # print(f"  -> vsg path {self.vsg_path}")
+        # print(f"  -> satellite path {self.satellite_path}")
 
     def update_dd_satellite_path(self, all_vsg_list, all_sat_list, all_gserver_list, G):
         best_full_vsg_path = None
@@ -988,19 +979,59 @@ class GSFC:
                     self.is_appended = True
                 else:  # 얘네는 안됨!!!!!! 다 처리했어야함!!!!
                     self.is_dropped = True
+                    self.update_num_fail_gsfc_per_vsg(all_sat_list, all_vsg_list)
                     write_gsfc_csv_log(self.gsfc_log_path, t, self, "DROP")
                     input("경로가 끝났을 리 없어~~~~~")
+        else: # 경로 남음
+            if t > self.tolerance_time_ms: # 허용 가능 시간 초과
+                self.is_dropped = True
+                self.update_num_fail_gsfc_per_vsg(all_sat_list, all_vsg_list)
+                input("허용 가능 시간 초과")
 
         is_done = True if (self.is_succeed or self.is_dropped) else False
         return is_done
 
+    def update_vsg_stats_for_gsfc(self, vsg_list):
+        visited_vsg_ids = set()
+
+        for vsg_id, tag in self.vsg_path:
+            visited_vsg_ids.add(vsg_id)
+
+        for vsg_id in visited_vsg_ids:
+            vsg_list[vsg_id].num_passing_gsfc += 1
+
+    def update_num_fail_gsfc_per_vsg(self, sat_list, vsg_list):
+        for sat_id, tag in self.satellite_path:
+            # 위성 인덱스 범위 밖이면 (gserver 등) 스킵
+            if not (0 <= sat_id < NUM_SATELLITES):
+                continue
+
+            vsg_id = sat_list[sat_id].current_vsg_id
+            # VSG에 속하지 않은 위성이면 스킵
+            if vsg_id is None:
+                continue
+
+            # VSG별 홉 수 카운트
+            self.delay_per_vsg[vsg_id] = self.delay_per_vsg.get(vsg_id, 0) + 1
+
+        # 방문한 VSG가 하나도 없으면 아무것도 하지 않음
+        if not self.delay_per_vsg:
+            return
+
+        # 홉 수가 가장 큰 VSG = 이 GSFC 실패에 가장 기여한 VSG
+        fail_vsg_id = max(self.delay_per_vsg, key=self.delay_per_vsg.get)
+
+        # 해당 VSG의 실패 기여 GSFC 수 증가
+        vsg_list[fail_vsg_id].num_fail_gsfc += 1
+
     def time_tic(self, t, data_rate_pair, all_vsg_list, all_gserver_list, all_sat_list, G, vsg_G):
         # GSFC 처리 로직
-        if self.is_succeed:
+        if self.is_succeed or self.is_dropped:
             return 0
         else:
             is_done = self.check_gsfc_done(t, all_vsg_list, all_gserver_list, all_sat_list, G, vsg_G)
             if is_done:
+                self.update_vsg_stats_for_gsfc(all_vsg_list)
                 return 0
 
             if self.state == 1:  # processing
@@ -1149,3 +1180,4 @@ class GSFC:
                 self.DH_remaining_ongoing_time_slot -= 1
             else:
                 input("state가 4보다 클 순 없어~~~~~")
+

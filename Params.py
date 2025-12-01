@@ -13,35 +13,14 @@ LAT_RANGE = [-90, 90]
 LON_RANGE = [-180, 180]
 
 LAT_STEP = 60
-LON_STEP = 72
+LON_STEP = 72 #36, 72
 PARAM_C = 299792458 # [m/s]
 
-# SFC
-# VNF_PER_SFC = (1, 2) # 현재 5개 고정
-
-# mMTC(S&F): DDoS[1] → FW[2] → TCP[3] → NAT[4]
-# uRLLC(Local): FW[2]
-# eMBB(UE-SAT-UE): DDoS[1] → FW[2] → LB[5] → TCP[3] → VideoOpt[6]
-SFC_TYPE_LIST = {
-    0: ['1', '2', '5', '3', '6'], #eMBB
-    1: ['2'], #uRLLC
-    2: ['1', '2', '3', '4'], # 'mMTC'
-}
-
-VNF_SIZE = 5e6 # [bit]  ≈125 KB
-SFC_TOLERANCE_TIME = {
-    0: 100, # eMBB
-    1: 50,  # uRLLC
-    2: 1000, # mMTC
-}
-#100 * 8 # [bit] (100 B * 8)
-# SFC_SIZE = 5e6 # [bit]  ≈625 KB
-#512 * 8 # [bit]
+VNF_SIZE = 1e6 # [bit]  ≈125 KB
 
 # simulation
-NUM_ITERATIONS = 100 #400
+NUM_ITERATIONS = 50 #sec
 NUM_GSFC = 1 #33 # int(2*1024*1024/SFC_SIZE*8) #[per ms]
-TAU = 1000 # 1ms 단위로 맞추기
 
 # VSG
 # 0: FW
@@ -51,10 +30,10 @@ TAU = 1000 # 1ms 단위로 맞추기
 # 4: compress
 # 5: security wrapper
 # 6: egress
-VNF_TYPES_PER_VSG = (0, 7) #3
+VNF_TYPES_PER_VSG = (1, 7)
 
 NUM_VNFS_PER_SAT = 1 #10
-NUM_VNFS_PER_VSG = 2
+NUM_VNFS_PER_VSG = 1 #2
 
 # satellite capacity
 # SAT_QUEUE_SIZE = (SFC_SIZE // 8) * 50 * 8 # [bit] (SFC_SIZE[B] * 50) * 8
@@ -75,34 +54,45 @@ GSERVER_NUM_PROCESS_VNF = 4 # 동시에 처리 가능한 VNF 수
 # 0~360 Longitude를 쓰신다면 -180~180으로 변환하는 로직을 추가하거나 데이터를 0~360으로 맞추면 됩니다.
 MAJOR_HUBS = [
     # (Lat, Lon, Type, Radius_km)
-    (37.5665, 126.9780, "Urban_eMBB", 50),   # Seoul
-    (35.6762, 139.6503, "Urban_eMBB", 60),   # Tokyo
-    (40.7128, -74.0060, "Urban_eMBB", 60),   # New York
-    (51.5074, -0.1278,  "Urban_eMBB", 50),   # London
-    (31.2304, 121.4737, "Urban_URLLC", 40),  # Shanghai (Port + City)
-    (1.3521, 103.8198,  "Urban_URLLC", 30),  # Singapore (Port + City)
-    (51.9244, 4.4777,   "Urban_URLLC", 20),  # Rotterdam (Major Port)
-    (25.0478, 55.1732,  "Urban_URLLC", 20),  # Jebel Ali (Dubai Port)
+    (37.5665, 126.9780, "eMBB", 50),   # Seoul
+    (35.6762, 139.6503, "eMBB", 60),   # Tokyo
+    (40.7128, -74.0060, "eMBB", 60),   # New York
+    (51.5074, -0.1278,  "eMBB", 50),   # London
+    (31.2304, 121.4737, "URLLC", 40),  # Shanghai (Port + City)
+    (1.3521, 103.8198,  "URLLC", 30),  # Singapore (Port + City)
+    (51.9244, 4.4777,   "URLLC", 20),  # Rotterdam (Major Port)
+    (25.0478, 55.1732,  "URLLC", 20),  # Jebel Ali (Dubai Port)
 ]
 
-# --- [NEW] VNF Chain Definitions (서베이 기반) ---
-SFC_EMBB_SEQ = ["Firewall", "DPI", "NAT"]         # 고처리량, 보안, 주소변환
-SFC_URLLC_SEQ = ["Firewall", "Load_Balancer"]     # 저지연, 경로 최적화
-SFC_MMTC_SEQ = ["IoT_Gateway", "DPI"]             # 대규모 연결 관리
+# mMTC(S&F): DDoS[1] → FW[2] → TCP[3] → NAT[4]
+# uRLLC(Local): FW[2]
+# eMBB(UE-SAT-UE): DDoS[1] → FW[2] → LB[5] → TCP[3] → VideoOpt[6]
+SFC_EMBB_SEQ = ['1', '2', '5', '3', '6']         # 고처리량, 보안, 주소변환
+SFC_URLLC_SEQ = ['2']     # 저지연, 경로 최적화
+SFC_MMTC_SEQ = ['1', '2', '3', '4']             # 대규모 연결 관리
 
 # eMBB 파라미터
 EMBB_ARRIVAL_RATE = 1800    # packets per second (Lambda)
-EMBB_LATENCY_LIMIT = 4      # ms
+EMBB_LATENCY_LIMIT = 500    # ms
 EMBB_PACKET_MIN_SIZE = 50   # bytes
 EMBB_PACKET_MAX_SIZE = 600  # bytes
 EMBB_PARETO_SHAPE = 1.5     # Pareto shape parameter (일반적인 인터넷 트래픽)
 
 # URLLC 파라미터
 URLLC_PERIOD = 2          # ms (Arrival interval)
-URLLC_LATENCY_LIMIT = 1   # ms (0.5 ~ 1ms)
+URLLC_LATENCY_LIMIT = 100 # ms (0.5 ~ 1ms)
 URLLC_PACKET_SIZE = 32    # bytes (Fixed)
 
 # mMTC 파라미터
 MMTC_PACKET_SIZE = 100 # bytes
 MMTC_LATENCY_LIMIT = 10000 # ms (10 seconds - Delay Tolerant)
 MMTC_DENSITY_FACTOR = 0.5 # 배경 트래픽 밀도 조절용 상수
+
+# VSG size 업데이트
+VSG_EVAL_INTERVAL_TIC = 1000       # 예: 1000 tic마다 한 번 평가
+VSG_EVAL_WINDOW_SIZE = 200        # 예: 최근 200개의 GSFC 결과 기준
+VSG_FAIL_RATIO_THRESHOLD = 0.2    # 이 이상 실패하면 VSG 분할 후보
+VSG_SUCCESS_RATIO_THRESHOLD = 0.98  # 이 이상이면 병합 후보 (성공률 매우 좋을 때)
+
+BATCH_SIZE = 30
+TIME_TO_CHECK_MERGE = 50

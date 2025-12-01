@@ -14,38 +14,18 @@ import pickle
 import ast
 import math
 
-def get_vsg_id_from_coords(lat, lon):
+def get_vsg_id_from_coords(vsg_list, lat, lon, eps=1e-9):
     """
     위경도 좌표를 입력받아 해당 위치의 VSG ID를 반환 (O(1))
     """
-    # 범위 벗어나는 경우 예외 처리 (Clamp)
-    lat = max(min(lat, LAT_RANGE[1]), LAT_RANGE[0])
+    for vsg in vsg_list:
+        in_lat = (vsg.lat_min - eps) <= lat <= (vsg.lat_max + eps)
+        in_lon = (vsg.lon_min - eps) <= lon <= (vsg.lon_max + eps)
+        if in_lat and in_lon:
+            return vsg.id
 
-    # 경도 순환 고려 (-180 ~ 180)
-    # 만약 lon이 180.1 처럼 경계값을 살짝 넘으면 -179.9로 보정하거나,
-    # 단순히 범위 내로 clamp 할 수도 있습니다. 여기선 Clamp로 처리합니다.
-    lon = max(min(lon, LON_RANGE[1]), LON_RANGE[0])
-
-    # 행(Row), 열(Col) 인덱스 계산
-    # int()를 취해 소수점을 버리면 해당 그리드 인덱스가 됨
-    lat_idx = int((lat - LAT_RANGE[0]) / LAT_STEP)
-    lon_idx = int((lon - LON_RANGE[0]) / LON_STEP)
-
-    # 전체 열 개수 (가로로 VSG가 몇 개 있는지)
-    num_cols = math.ceil((LON_RANGE[1] - LON_RANGE[0]) / LON_STEP)
-    num_rows = math.ceil((LAT_RANGE[1] - LAT_RANGE[0]) / LAT_STEP)
-
-    # 경계값(최대값) 처리: 예) 위도가 정확히 90도일 경우 인덱스가 넘어가므로 보정
-    if lat_idx >= num_rows:
-        lat_idx = num_rows - 1
-    if lon_idx >= num_cols:
-        lon_idx = num_cols - 1
-
-    # VSG ID 계산 (initial_vsg_regions의 생성 순서가 Lat(행) -> Lon(열) 순서라고 가정)
-    # vid = 행_인덱스 * 열_개수 + 열_인덱스
-    vsg_id = lat_idx * num_cols + lon_idx
-
-    return vsg_id
+    input(f"No VSG found for coords lat={lat}, lon={lon}")
+    return -1
 
 # 해당 vnf tag가 'vnf#'인지 확인
 def has_vnf_tag(x):
@@ -266,6 +246,8 @@ GSFC_LOG_HEADER = [
     "time_ms",
     "mode",
     "gsfc_id",
+    "gsfc_type",
+    "tolerance_delay_ms",
     "is_succeed",
     "is_dropped",
     "event",
@@ -316,6 +298,8 @@ def write_gsfc_csv_log(file_path, time_ms, gsfc, event):
         time_ms,
         getattr(gsfc, "mode", ""),
         getattr(gsfc, "id", None),
+        getattr(gsfc, "gsfc_type", None),
+        getattr(gsfc, "tolerance_time_ms", None),
         getattr(gsfc, "is_succeed", False),
         getattr(gsfc, "is_dropped", False),
         event,
@@ -790,14 +774,14 @@ def plot_e2e_summary(modes, data_rate_pairs, base_results_dir="./results"):
     # 1) [모드별] data_rate_pair 비교
     plot_e2e_vs_data_rate(
         df_succ,
-        out_path=os.path.join(out_dir, "test_e2e_vs_data_rate_per_mode.png"),
+        out_path=os.path.join(out_dir, "e2e_vs_data_rate_per_mode.png"),
     )
 
     # 2) [data_rate_pair별] mode 비교
     plot_e2e_vs_mode(
         df_succ,
         out_dir=out_dir,
-        prefix="test_e2e_vs_mode_",
+        prefix="e2e_vs_mode_",
     )
 
 # 파싱 헬퍼 함수 (CSV의 문자열을 리스트/딕셔너리로 변환)

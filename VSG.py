@@ -6,7 +6,7 @@ import random
 import math
 
 class VSG:
-    def __init__(self, id, center_coords, lon_min, lat_min, satellites, gserver, mode, vsg_log_path):
+    def __init__(self, id, center_coords, lon_min, lon_max, lat_min, lat_max, satellites, gserver, mode, vsg_log_path):
         self.id = id
         self.mode = mode
         self.vsg_log_path = vsg_log_path
@@ -14,10 +14,19 @@ class VSG:
         self.satellites = satellites
         self.center_coords = center_coords  # lon, lat
         self.lon_min = lon_min
-        self.lon_max = self.lon_min + LON_STEP
+        self.lon_max = lon_max
         self.lat_min = lat_min
-        self.lat_max = self.lat_min + LAT_STEP
+        self.lat_max = lat_max
         self.gserver = gserver
+
+        self.num_passing_gsfc = 0 # 현 vsg를 지나간 gsfc 수
+        self.num_failed_gsfc = 0 # 현 vsg가 실패에 영향을 준 gsfc
+        self.parent_id = None  # divide로 생긴 child면 부모 VSG id
+        self.parent_lon_min = None
+        self.parent_lon_max = None
+        self.parent_lat_min = None
+        self.parent_lat_max = None
+        self.children_ids = []  # 내가 부모라면 내 자식들 id
 
         self.time = 0
 
@@ -147,8 +156,106 @@ class VSG:
 
         return lost_vnf_types
 
-    def time_tic(self, all_sat_list, all_gsfc_list, cur_time):
+    def merge_vsg(self, vsg_list):
+        parent_id = self.parent_id if self.parent_id is not None else self.id
+
+        parent = vsg_list[parent_id]
+        parent.lat_min = parent.parent_lat_min
+        parent.lat_max = parent.parent_lat_max
+        parent.lon_min = parent.parent_lon_min
+        parent.lon_max = parent.parent_lon_max
+        parent.num_passing_gsfc = 0
+        parent.num_failed_gsfc = 0
+
+
+    def divide_vsg(self, vsg_list, sat_list):
+        lat_span = self.lat_max - self.lat_min
+        lon_span = self.lon_max - self.lon_min
+        if (lat_span < 1e-3) and (lon_span < 1e-3):
+            return -1
+
+        split_vertical = (lon_span >= lat_span) # True면 경도를 기준으로 나누기
+
+        if split_vertical:
+            parent_lon_min, parent_lon_max, parent_lat_min, parent_lat_max = self.lon_min, self.lon_max, self.lat_min, self.lat_max
+            mid = 0.5 * (self.lon_min + self.lon_max)
+
+            cell_sats_1 = [
+                sat for sat in sat_list
+                if self.lat_min <= sat.lat < self.lat_max and self.lon_min <= sat.lon < mid
+            ]
+            cell_sats_2 = [
+                sat for sat in sat_list
+                if self.lat_min <= sat.lat < self.lat_max and mid <= sat.lon < self.lon_max
+            ]
+
+            if (len(cell_sats_1) == 0) or (len(cell_sats_2) == 0):
+                return 0
+
+            new_id = len(vsg_list)
+            vsg = VSG(new_id, self.center_coords, mid, self.lon_max, self.lat_min, self.lat_max, [], self.gserver, self.mode, self.vsg_log_path)
+            vsg.assigned_vnfs = self.assigned_vnfs
+            vsg.parent_id = self.id
+            vsg_list.append(vsg)
+
+            self.lon_max = mid
+            self.satellites = [] # vnf 재할당 필요 여부 확인을 위해 빈 배열 할당
+            self.num_passing_gsfc = 0
+            self.num_failed_gsfc = 0
+            self.children_ids.append(vsg.id)
+            self.parent_lon_min = parent_lon_min
+            self.parent_lon_max = parent_lon_max
+            self.parent_lat_min = parent_lat_min
+            self.parent_lat_max = parent_lat_max
+        else:
+            parent_lon_min, parent_lon_max, parent_lat_min, parent_lat_max = self.lon_min, self.lon_max, self.lat_min, self.lat_max
+            mid = 0.5 * (self.lat_min + self.lat_max)
+
+            cell_sats_1 = [
+                sat for sat in sat_list
+                if self.lat_min <= sat.lat < mid and self.lon_min <= sat.lon < self.lon_max
+            ]
+            cell_sats_2 = [
+                sat for sat in sat_list
+                if mid <= sat.lat < self.lat_max and self.lon_min <= sat.lon < self.lon_max
+            ]
+
+            if (len(cell_sats_1) == 0) or (len(cell_sats_2) == 0):
+                return 0
+
+            new_id = len(vsg_list)
+            vsg = VSG(new_id, self.center_coords, self.lon_min, self.lon_max, mid, self.lat_max, [], self.gserver, self.mode, self.vsg_log_path)
+            vsg.assigned_vnfs = self.assigned_vnfs
+            vsg_list.append(vsg)
+            vsg.parent_id = self.id
+
+            self.lat_max = mid
+            self.satellites = [] # vnf 재할당 필요 여부 확인을 위해 빈 배열 할당
+            self.num_passing_gsfc = 0
+            self.num_failed_gsfc = 0
+            self.children_ids.append(vsg.id)
+            self.parent_lon_min = parent_lon_min
+            self.parent_lon_max = parent_lon_max
+            self.parent_lat_min = parent_lat_min
+            self.parent_lat_max = parent_lat_max
+
+    def check_resize(self, vsg_list, sat_list, current_time):
+        if self.num_passing_gsfc == 0:
+            return 0
+
+        fail_rate_in_vsg = self.num_failed_gsfc / self.num_passing_gsfc
+
+        if (fail_rate_in_vsg == 0) and (current_time % TIME_TO_CHECK_MERGE == 0):
+            input(f"MERGE {self.id}")
+            self.merge_vsg(vsg_list)
+        elif fail_rate_in_vsg >= 0.5:
+            input(f"DIVIDE {self.id}")
+            self.divide_vsg(vsg_list, sat_list)
+
+    def time_tic(self, all_vsg_list, all_sat_list, all_gsfc_list, cur_time):
         self.time = cur_time
+
+        # self.check_resize(all_vsg_list, all_sat_list, cur_time)
 
         is_inconsistent = False
         lost_vnfs = []

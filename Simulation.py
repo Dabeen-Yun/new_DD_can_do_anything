@@ -43,6 +43,15 @@ class Simulation:
         self.video_path = ""
         self.video_fps = 10
 
+        # eMBB gateway 관련 파라미터
+        gw_city_df = pd.read_csv("./data/gateways_starlink_sx.csv")
+        self.gw_city_df = gw_city_df[["lat", "lng"]].reset_index(drop=True)
+        self.gw_city_lats = self.gw_city_df["lat"].to_numpy(dtype=float)
+        self.gw_city_lons = self.gw_city_df["lng"].to_numpy(dtype=float)
+
+        gw_continent_df = pd.read_csv("./data/gateway_continets.csv")
+        self.gw_continent_df = gw_continent_df[["lat", "lng"]].reset_index(drop=True)
+
     def set_constellation(self, mode):
         phasing_inter_plane = 180 / NUM_ORBITS
 
@@ -116,6 +125,7 @@ class Simulation:
                 ]
 
                 if not cell_sats:
+                    print(f"NO SAT in VSG {vid+1}")
                     continue
 
                 center_lat = (lat_min + LAT_STEP) / 2
@@ -123,7 +133,7 @@ class Simulation:
 
                 ground_server = Gserver(gid, center_lon, center_lat, vid)
 
-                vsg = VSG(vid, (center_lon, center_lat), lon_min, lat_min, cell_sats, ground_server, mode, self.vsg_log_path)
+                vsg = VSG(vid, (center_lon, center_lat), lon_min, lon_max, lat_min, lat_max, cell_sats, ground_server, mode, self.vsg_log_path)
                 for sat in cell_sats:
                     sat.current_vsg_id = vid
                     sat.vsg_enter_time = time()
@@ -169,19 +179,37 @@ class Simulation:
             print("------------------------------------------")
 
     def initial_vnfs_to_vsg(self):
-        # TODO. 0.8에서 0.3으로 축소
-        vnf_set_sat_ids = sorted(random.sample(range(0,NUM_SATELLITES), int(NUM_SATELLITES*0.8)))
+        vnf_types = list(range(VNF_TYPES_PER_VSG[0], VNF_TYPES_PER_VSG[1]))  # [1,2,3,4,5,6]
 
-        for sat in self.sat_list:
-            if sat.id in vnf_set_sat_ids:
-                vnfs = sorted(random.sample(range(*VNF_TYPES_PER_VSG), NUM_VNFS_PER_SAT))
-                assigned_vnfs = [str(v) for v in vnfs]
-                sat.vnf_list = assigned_vnfs
+        # 각 VNF 타입을 적어도 하나의 VSG에 강제로 배치
+        for v in vnf_types:
+            candidate_vsgs = [
+                vsg for vsg in self.vsg_list
+                if len(vsg.assigned_vnfs) < NUM_VNFS_PER_VSG
+            ]
+
+            vsg = random.choice(candidate_vsgs)
+            vsg.assigned_vnfs.append(str(v))
+
+        # 각 VSG별로 나머지 슬롯을 랜덤 채우기
+        for vsg in self.vsg_list:
+            # 지금 이미 몇 개가 채워져 있는지
+            current = set(vsg.assigned_vnfs)
+            remain_slots = NUM_VNFS_PER_VSG - len(current)
+
+            if remain_slots <= 0:
+                vsg.assigned_vnfs = sorted(current, key=int)
+                continue
+
+            # 가능한 후보 타입들
+            candidates = [str(v) for v in vnf_types if str(v) not in current]
+
+            extra = random.sample(candidates, remain_slots)
+            assigned_vnfs_set = current.union(extra)
+            vsg.assigned_vnfs = sorted(list(assigned_vnfs_set), key=int)
 
         for vsg in self.vsg_list:
-            sampled_vnf_types = random.sample(range(VNF_TYPES_PER_VSG[0], VNF_TYPES_PER_VSG[1] + 1), k=NUM_VNFS_PER_VSG)
-            assigned_vnfs_set = {str(v) for v in sampled_vnf_types}
-            vsg.assigned_vnfs = list(assigned_vnfs_set)
+            assigned_vnfs_set = set(vsg.assigned_vnfs)
 
             current_hosted_vnfs = set()
             for sat in vsg.satellites:
@@ -308,32 +336,62 @@ class Simulation:
     # TODO. packet 생성 코드 삽입
     def calculate_haversine_distance(self, lat1, lon1, lat2, lon2):
         """
-        두 위경도 좌표 간의 거리를 km 단위로 반환 (Haversine Formula)
+        두 위경도 좌표 간의 거리를 m 단위로 반환 (Haversine Formula)
         """
-        R = 6371.0  # 지구 반지름 (km)
+        lat1 = np.radians(lat1)
+        lon1 = np.radians(lon1)
+        lat2 = np.radians(lat2)
+        lon2 = np.radians(lon2)
 
-        dlat = math.radians(lat2 - lat1)
-        dlon = math.radians(lon2 - lon1)
+        dlat = lat2 - lat1
+        dlon = lon2 - lon1
 
-        a = (math.sin(dlat / 2) ** 2 +
-             math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) *
-             math.sin(dlon / 2) ** 2)
+        a = (np.sin(dlat / 2.0) ** 2 +
+             np.cos(lat1) * np.cos(lat2) * np.sin(dlon / 2.0) ** 2)
 
-        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+        c = 2.0 * np.arctan2(np.sqrt(a), np.sqrt(1.0 - a))
 
-        distance = R * c
+        # dlat = math.radians(lat2 - lat1)
+        # dlon = math.radians(lon2 - lon1)
+        #
+        # a = (math.sin(dlat / 2) ** 2 +
+        #      math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) *
+        #      math.sin(dlon / 2) ** 2)
+        #
+        # c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+        distance = R_EARTH_RADIUS * c
         return distance
 
     # ---------------------------------------------------------
     # 2. 트래픽 생성 로직
     # ---------------------------------------------------------
+    def pick_random_vsg_city(self, range):
+        """
+        CSV에서 랜덤 도시 하나 뽑아서 (lat, lon, vsg_id) 반환
+        """
+        if range == "city":
+            idx = random.randrange(len(self.gw_city_df))
+            row = self.gw_city_df.iloc[idx]
+        elif range == "continent":
+            idx = random.randrange(len(self.gw_continent_df))
+            row = self.gw_continent_df.iloc[idx]
+        else:
+            input("------------ RANGE IS 'city' OR 'continent'. ------------")
+            return 0
+        gw_lat = float(row["lat"])
+        gw_lon = float(row["lng"])
+
+        gw_vsg_id = get_vsg_id_from_coords(self.vsg_list, gw_lat, gw_lon)
+        return gw_vsg_id, gw_lat, gw_lon
+
     def generate_embb_cluster(self, hub_lat, hub_lon, radius_km, mode):
         """
         특정 eMBB 도시에서의 트래픽 생성 (Poisson + Pareto)
         """
         # 1초(1000ms)당 EMBB_ARRIVAL_RATE 만큼 발생한다고 가정
         # 1ms 당 평균 발생 횟수 (Lambda)
-        lam = EMBB_ARRIVAL_RATE #/ 1000.0
+        lam = EMBB_ARRIVAL_RATE / 1000.0
         # Poisson 분포를 사용하여 이번 1ms에 발생한 패킷 수 결정
         # lam이 아주 작아도(예: 0.05), 확률적으로 0 또는 1이 나옵니다.
         num_packets = np.random.poisson(lam)
@@ -350,14 +408,28 @@ class Simulation:
 
                 pkt_size = min(int(sizes[i]), EMBB_PACKET_MAX_SIZE)
 
-                src_vsg_id = get_vsg_id_from_coords(p_lat, p_lon)
-                # dst_vsg_id 설정 방식?
-                dst_vsg_id = 0
+                src_vsg_id = get_vsg_id_from_coords(self.vsg_list, p_lat, p_lon)
+                dst_vsg_id, dst_lat, dst_lon = self.pick_random_vsg_city(range='city')
 
                 gsfc_type = 'eMBB'
+                # TODO. gsfc가 변동될 것을 고려해서 dst_lat, dst_lon도 넘겨야하나?
                 gsfc = GSFC(self.generated_gsfc_id, src_vsg_id, dst_vsg_id, pkt_size, SFC_EMBB_SEQ, EMBB_LATENCY_LIMIT, mode, gsfc_type, self.gsfc_log_path, p_lon, p_lat)
                 self.gsfc_list.append(gsfc)
                 self.generated_gsfc_id += 1
+
+    def nearest_gateway_coords(self, lat, lon):
+        """
+        (lat_deg, lon_deg)에서 거리 기준으로 가장 가까운 gateway의 (lat, lon)을 반환
+        """
+        c = self.calculate_haversine_distance(lat, lon, self.gw_city_lats, self.gw_city_lons)
+
+        # 지구 반지름 곱하면 실제 거리지만, argmin만 필요하니까 c만 써도 됨
+        idx = int(np.argmin(c))
+        return float(self.gw_city_lats[idx]), float(self.gw_city_lons[idx])
+
+    def pick_nearest_dst_vsg(self, lat, lon):
+        gw_lat, gw_lon = self.nearest_gateway_coords(lat, lon)
+        return get_vsg_id_from_coords(self.vsg_list, gw_lat, gw_lon)
 
     def generate_urllc_cluster(self, hub_lat, hub_lon, radius_km, current_time_ms, mode):
         """
@@ -366,16 +438,15 @@ class Simulation:
         # 주기적 발생 체크 (2ms 마다)
         if current_time_ms % URLLC_PERIOD == 0:
             # 핫스팟 내 기기들이 동시다발적으로 전송한다고 가정 (Burst)
-            num_devices = 2000  # 핫스팟 당 기기 수
+            num_devices = 2  # 핫스팟 당 기기 수
 
             for _ in range(num_devices):
                 sigma = radius_km / 111.0 / 3  # URLLC는 더 좁게 밀집
                 p_lat = random.gauss(hub_lat, sigma)
                 p_lon = random.gauss(hub_lon, sigma)
 
-                src_vsg_id = get_vsg_id_from_coords(p_lat, p_lon)
-                # dst_vsg_id 설정 방식?
-                dst_vsg_id = 0
+                src_vsg_id = get_vsg_id_from_coords(self.vsg_list, p_lat, p_lon)
+                dst_vsg_id = self.pick_nearest_dst_vsg(p_lat, p_lon)
 
                 gsfc_type = 'URLLC'
                 gsfc = GSFC(self.generated_gsfc_id, src_vsg_id, dst_vsg_id, URLLC_PACKET_SIZE, SFC_URLLC_SEQ, URLLC_LATENCY_LIMIT, mode,
@@ -402,9 +473,8 @@ class Simulation:
             if -60 <= lat < 60:
                 continue
 
-            src_vsg_id = get_vsg_id_from_coords(lat, lon)
-            # dst_vsg_id 설정 방식?
-            dst_vsg_id = 0
+            src_vsg_id = get_vsg_id_from_coords(self.vsg_list, lat, lon)
+            dst_vsg_id, dst_lat, dst_lon = self.pick_random_vsg_city(range='continent')
 
             gsfc_type = 'mMTC'
             gsfc = GSFC(self.generated_gsfc_id, src_vsg_id, dst_vsg_id, MMTC_PACKET_SIZE, SFC_MMTC_SEQ, MMTC_LATENCY_LIMIT, mode,
@@ -419,14 +489,71 @@ class Simulation:
         10ms 동안 발생하는 모든 트래픽을 시뮬레이션하여 반환.
         """
         # 1. Hub별 트래픽 생성
+        src_vsg_id, src_lat, src_lon = self.pick_random_vsg_city(range='city')
+        # TODO. 생성 위치 변경
         for lat, lon, p_type, rad in MAJOR_HUBS:
-            if p_type == "Urban_eMBB":
+            if p_type == "eMBB": # 6개
                 self.generate_embb_cluster(lat, lon, rad, mode)
-            elif p_type == "Urban_URLLC":
+            if p_type == "URLLC": # 799개
                 self.generate_urllc_cluster(lat, lon, rad, current_sim_time_ms, mode)
 
-        # 2. 배경 mMTC 트래픽 생성
+        # 2. 배경 mMTC 트래픽 생성 # 21개
         self.generate_global_mmtc(mode)
+
+    def interval_overlap(self, a_min, a_max, b_min, b_max, eps=1e-6):
+        """
+        열린 구간 겹침 여부 (길이가 0보다 크게 겹치는지)
+        """
+        return (a_min < b_max - eps) and (b_min < a_max - eps)
+
+    def is_neighbor_vsg(self, v1, v2, eps=1e-6):
+        """
+        두 VSG 사각형이 변을 공유하면 True.
+        - lat 방향으로 구간이 겹치고(long edge가 맞닿는 경우)
+        - 혹은 lon 방향으로 구간이 겹치고(lat edge가 맞닿는 경우)
+        """
+        # 세로 방향 인접 (동/서 방향 이웃)
+        lat_overlap = Simulation.interval_overlap(v1.lat_min, v1.lat_max,
+                                                   v2.lat_min, v2.lat_max, eps)
+        vertical_touch = lat_overlap and (
+                abs(v1.lon_max - v2.lon_min) < eps or
+                abs(v2.lon_max - v1.lon_min) < eps
+        )
+
+        # 가로 방향 인접 (남/북 방향 이웃)
+        lon_overlap = Simulation.interval_overlap(v1.lon_min, v1.lon_max,
+                                                   v2.lon_min, v2.lon_max, eps)
+        horizontal_touch = lon_overlap and (
+                abs(v1.lat_max - v2.lat_min) < eps or
+                abs(v2.lat_max - v1.lat_min) < eps
+        )
+
+        return vertical_touch or horizontal_touch
+
+    def rebuild_vsg_graph(self):
+        """
+        현재 self.vsg_list의 lon/lat 범위를 기반으로 vsg_G를 다시 만든다.
+        """
+        # 기존 그래프 비우기 (노드/엣지 모두 삭제)
+        self.vsg_G = nx.Graph()
+
+        # 1) 노드 추가
+        for vsg in self.vsg_list:
+            self.vsg_G.add_node(vsg.id)
+
+        # 2) 모든 VSG 쌍에 대해 인접 여부 체크 후 edge 추가
+        n = len(self.vsg_list)
+        for i in range(n):
+            v1 = self.vsg_list[i]
+            for j in range(i + 1, n):
+                v2 = self.vsg_list[j]
+
+                if not self.is_neighbor_vsg(v1, v2):
+                    continue
+
+                # 가중치는 기존처럼 중심점 간 거리 사용
+                dist = self.get_distance_between_VSGs(v1.id, v2.id)
+                self.vsg_G.add_edge(v1.id, v2.id, weight=dist)
 
     def visualized_network_constellation(self, t, filename="./results/network_constellation.png"):
         # 경로 추적
@@ -676,83 +803,83 @@ class Simulation:
         self.initial_vnfs_to_vsg()
         self.compute_all_pair_distance(csv_dir_path, mode)
 
-        # self.visualized_network_constellation(t=0)
+        self.visualized_network_constellation(t=0)
 
         new_gsfc_id_start = 0
         t = 0 #ms
 
-        for i in range(100):
+        # while True:
+        for i in range(500):
             print(f"\n==================== TIME TICK {t} MS ====================")
 
             # gsfc 생성
             if t < NUM_ITERATIONS:
                 # self.generate_gsfc(new_gsfc_id_start, mode)
-                # TODO. self.gsfc 리스트에 넣어야함
                 self.generate_traffic(t, mode)
                 self.visualized_network_constellation(t)
-                t+=1
-        #     # gsfc 초기 경로 생성
-        #     for gsfc in self.gsfc_list[new_gsfc_id_start:]:
-        #         if mode == "dd":
-        #             gsfc.set_dd_satellite_path(self.vsg_list, self.sat_list, self.G)
-        #         else:
-        #             gsfc.set_gsfc_flow_rule(self.vsg_list, self.vsg_G)
-        #             gsfc.set_vsg_path(self.vsg_G)
-        #             if mode == "basic":
-        #                 gsfc.set_basic_satellite_path(self.vsg_list, self.G)
-        #             elif "sd" in mode:
-        #                 gsfc.set_sd_satellite_path(self.vsg_list, self.gserver_list, self.sat_list, self.G, self.vsg_G)
-        #             else:
-        #                 print("\n")
-        #                 print(f"[ERROR] Unknown mode {mode}")
-        #                 print("\n")
-        #                 return []
-        #         write_gsfc_csv_log(self.gsfc_log_path, t, gsfc, "INIT_PATH")
-        #         new_gsfc_id_start += 1
-        #
-        #     # 종료 여부 파악
-        #     all_completed = True
-        #     for gsfc in self.gsfc_list:
-        #         if not gsfc.is_succeed and not gsfc.is_dropped:
-        #             all_completed = False
-        #             break
-        #
-        #     if all_completed:
-        #         print(f"\n*** 모든 GSFC가 succeed 또는 dropped 상태로 완료되었습니다. 시뮬레이션을 종료합니다. ***")
-        #         # input("\nPress Enter to continue the simulation...\n")
-        #         break
-        #
-        #     # gsfc 처리
-        #     for gsfc in self.gsfc_list:
-        #         gsfc.time_tic(t, data_rate_pair, self.vsg_list, self.gserver_list, self.sat_list, self.G, self.vsg_G)
-        #
+            # gsfc 초기 경로 생성
+            for gsfc in self.gsfc_list[new_gsfc_id_start:]:
+                if mode == "dd":
+                    gsfc.set_dd_satellite_path(self.vsg_list, self.sat_list, self.G)
+                else:
+                    gsfc.set_gsfc_flow_rule(self.vsg_list, self.vsg_G)
+                    gsfc.set_vsg_path(self.vsg_list, self.vsg_G)
+                    if mode == "basic":
+                        gsfc.set_basic_satellite_path(self.vsg_list, self.G)
+                    elif "sd" in mode:
+                        gsfc.set_sd_satellite_path(self.vsg_list, self.gserver_list, self.sat_list, self.G, self.vsg_G)
+                    else:
+                        print("\n")
+                        print(f"[ERROR] Unknown mode {mode}")
+                        print("\n")
+                        return []
+                write_gsfc_csv_log(self.gsfc_log_path, t, gsfc, "INIT_PATH")
+                new_gsfc_id_start += 1
+
+            # 종료 여부 파악
+            all_completed = True
+            for gsfc in self.gsfc_list:
+                if not gsfc.is_succeed and not gsfc.is_dropped:
+                    all_completed = False
+                    break
+
+            if all_completed:
+                print(f"\n*** 모든 GSFC가 succeed 또는 dropped 상태로 완료되었습니다. 시뮬레이션을 종료합니다. ***")
+                break
+
+            # gsfc 처리
+            for gsfc in self.gsfc_list:
+                gsfc.time_tic(t, data_rate_pair, self.vsg_list, self.gserver_list, self.sat_list, self.G, self.vsg_G)
+
             # 위성 이동
             for sat in self.sat_list:
                 sat.time_tic(t)
-        #
-        #     # vsg 구역 재설정
-        #     lost_vnf_type_list = {}  # key: vsg_id, value: lost_vnf_types
-        #     is_topology_changed = False
-        #
-        #     for vsg in self.vsg_list:
-        #         lost_vnf_type_list[vsg.id] = []
-        #         lost_vnf_types = vsg.time_tic(self.sat_list, self.gsfc_list, t)
-        #         lost_vnf_type_list[vsg.id].extend(lost_vnf_types)
-        #
-        #         if lost_vnf_types:
-        #             is_topology_changed = True
-        #             print(f"====== CHANGE TOPOLOGY ======")
-        #             print(f"  -> vsg id {vsg.id} lost vnf types {lost_vnf_types}")
-        #
-        #     if is_topology_changed:
-        #         # gsfc 경로 재설정
-        #         for gsfc in self.gsfc_list:
-        #             gsfc.detour_satellite_path(lost_vnf_type_list, self.vsg_list, self.gserver_list, self.sat_list, self.G, mode)
-        #
-        #      self.visualized_network_constellation(t)
-        #
-        #     t += 1
-        #
+
+            # vsg 구역 재설정 # TODO. vsg_G 갱신
+            lost_vnf_type_list = {}  # key: vsg_id, value: lost_vnf_types
+            is_topology_changed = False
+
+            while i < len(self.vsg_list): # 중간에 vsg 추가되어도 추가된 vsg까지 검사하기 위함
+                vsg = self.vsg_list[i]
+                lost_vnf_type_list[vsg.id] = []
+                lost_vnf_types = vsg.time_tic(self.vsg_list, self.sat_list, self.gsfc_list, t)
+                lost_vnf_type_list[vsg.id].extend(lost_vnf_types)
+
+                if lost_vnf_types:
+                    is_topology_changed = True
+                    print(f"====== CHANGE TOPOLOGY ======")
+                    print(f"  -> vsg id {vsg.id} lost vnf types {lost_vnf_types}")
+
+            if is_topology_changed:
+                self.rebuild_vsg_graph()
+                # gsfc 경로 재설정
+                for gsfc in self.gsfc_list:
+                    gsfc.detour_satellite_path(lost_vnf_type_list, self.vsg_list, self.gserver_list, self.sat_list, self.G, mode)
+
+            self.visualized_network_constellation(t)
+
+            t += 1
+
         # 루프가 끝나고 나서
         if self.video_writer is not None:
             self.video_writer.release()

@@ -79,7 +79,7 @@ class Satellite:
         3차원 궤도 회전을 통해 위경도를 계산합니다.
         이 함수를 사용하면 경도가 -180~180 범위로 자동 계산됩니다.
         """
-        t_s = time_ms / 1000.0  # ms -> sec
+        t_s = time_ms * 100000.0  # ms -> sec
 
         # 1. 현재 궤도 내 각도 (Mean Anomaly)
         current_angle = self.initial_phase + (self.mean_motion * t_s)
@@ -99,13 +99,8 @@ class Satellite:
         y_eci = x_orb * sin_om + y_orb * cos_i * cos_om
         z_eci = y_orb * sin_i
 
-        # 4. 지구 자전 고려 (ECEF 좌표계 변환)
-        # 지구가 도는 속도(WE)만큼 보정
-        we = 7.2921151467e-5  # rad/s
-        theta_g = we * t_s
-
-        x_ecef = x_eci * math.cos(theta_g) + y_eci * math.sin(theta_g)
-        y_ecef = -x_eci * math.sin(theta_g) + y_eci * math.cos(theta_g)
+        x_ecef = x_eci
+        y_ecef = y_eci
         z_ecef = z_eci
 
         # 5. 위경도 변환 (핵심: atan2 사용으로 -180~180 범위 확보)

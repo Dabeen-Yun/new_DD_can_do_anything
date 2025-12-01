@@ -3,10 +3,6 @@ from Params import *
 from Simulation import *
 from Utility import *
 
-# 실행 프롬프트 main - NUM_ITERATIONS 100, NUM_GSFC 1, 'dd', 'basic' 이동성으로 인한 추가 경로 확인
-# 실행 프롬프트 basic - NUM_ITERATIONS 100, NUM_GSFC 1, 'dd', 'basic' 이동성 X
-# 실행 프롬프트 segmental Dijkstra - NUM_ITERATIONS 100, NUM_GSFC 1, 'dd', 'basic' vnf 재할당 방식 확인
-
 # TODO. vnf는 위성에 탑재되는 것, gsfc는 vnf 탑재가 아니라 vnf 수행이 필요 -> processing rate에서는 vnf size가 아니라 해당 패킷 사이즈가 필요
 
 
@@ -25,17 +21,18 @@ class Main:
     ]
 
     modes = ['basic']  # dd, basic, sd, upgrade_sd
+    #main: 15, dd: 30
 
     for pair in tqdm(data_rate_pairs):
         for mode in modes:
-            csv_dir_path = f"./test_results/{NUM_GSFC*NUM_ITERATIONS}/{mode}/{pair[0] / 1e6}sat_{pair[1] / 1e6}gs/"
+            csv_dir_path = f"./results/{NUM_GSFC*NUM_ITERATIONS}/{mode}/{pair[0] / 1e6}sat_{pair[1] / 1e6}gs/"
 
             simulation = Simulation()
             simulation.simulation_proceeding(mode, pair, csv_dir_path)
 
     for pair in tqdm(data_rate_pairs):
         for mode in modes:
-            csv_dir_path = f"./test_results/{NUM_GSFC * NUM_ITERATIONS}/{mode}/{pair[0] / 1e6}sat_{pair[1] / 1e6}gs/{mode}_gsfc_log.csv"
+            csv_dir_path = f"./results/{NUM_GSFC * NUM_ITERATIONS}/{mode}/{pair[0] / 1e6}sat_{pair[1] / 1e6}gs/{mode}_gsfc_log.csv"
             calculate_additional_path_stats(csv_dir_path)
             calculate_success_hop_stats(csv_dir_path)
             # animate_one_gsfc(0, modes, csv_dir_path)
@@ -44,5 +41,5 @@ class Main:
     plot_e2e_summary(
         modes=modes,
         data_rate_pairs=data_rate_pairs,
-        base_results_dir="./test_results",
+        base_results_dir="./results",
     )
