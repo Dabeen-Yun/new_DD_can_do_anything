@@ -1,0 +1,7 @@
+﻿uuid,town,lat,lng,minElevation,numAntennas,uplinkGhz
+Asia,Seoul,37.5665,126.978,25,8,2.1
+Europe,Frankfurt,50.1109,8.6821,25,8,2.1
+North-America,Denver,39.7392,-104.9903,25,8,2.1
+South-America,Brasilia,-15.7939,-47.8828,25,8,2.1
+Africa,Nairobi,-1.2864,36.8172,25,8,2.1
+Oceania,Sydney,-33.8688,151.2093,25,8,2.1
