@@ -19,7 +19,7 @@ PARAM_C = 299792458 # [m/s]
 VNF_SIZE = 1e6 # [bit]  ≈125 KB
 
 # simulation
-NUM_ITERATIONS = 50 #sec
+NUM_ITERATIONS = 10 # ms
 NUM_GSFC = 1 #33 # int(2*1024*1024/SFC_SIZE*8) #[per ms]
 
 # VSG

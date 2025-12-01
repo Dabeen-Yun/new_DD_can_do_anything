@@ -79,7 +79,7 @@ class Satellite:
         3차원 궤도 회전을 통해 위경도를 계산합니다.
         이 함수를 사용하면 경도가 -180~180 범위로 자동 계산됩니다.
         """
-        t_s = time_ms * 100000.0  # ms -> sec
+        t_s = time_ms / 1000.0  # ms -> sec
 
         # 1. 현재 궤도 내 각도 (Mean Anomaly)
         current_angle = self.initial_phase + (self.mean_motion * t_s)

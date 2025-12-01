@@ -979,14 +979,13 @@ class GSFC:
                     self.is_appended = True
                 else:  # 얘네는 안됨!!!!!! 다 처리했어야함!!!!
                     self.is_dropped = True
-                    self.update_num_fail_gsfc_per_vsg(all_sat_list, all_vsg_list)
+                    self.update_num_failed_gsfc_per_vsg(all_sat_list, all_vsg_list)
                     write_gsfc_csv_log(self.gsfc_log_path, t, self, "DROP")
                     input("경로가 끝났을 리 없어~~~~~")
         else: # 경로 남음
             if t > self.tolerance_time_ms: # 허용 가능 시간 초과
                 self.is_dropped = True
-                self.update_num_fail_gsfc_per_vsg(all_sat_list, all_vsg_list)
-                input("허용 가능 시간 초과")
+                self.update_num_failed_gsfc_per_vsg(all_sat_list, all_vsg_list)
 
         is_done = True if (self.is_succeed or self.is_dropped) else False
         return is_done
@@ -1000,7 +999,7 @@ class GSFC:
         for vsg_id in visited_vsg_ids:
             vsg_list[vsg_id].num_passing_gsfc += 1
 
-    def update_num_fail_gsfc_per_vsg(self, sat_list, vsg_list):
+    def update_num_failed_gsfc_per_vsg(self, sat_list, vsg_list):
         for sat_id, tag in self.satellite_path:
             # 위성 인덱스 범위 밖이면 (gserver 등) 스킵
             if not (0 <= sat_id < NUM_SATELLITES):
@@ -1022,7 +1021,7 @@ class GSFC:
         fail_vsg_id = max(self.delay_per_vsg, key=self.delay_per_vsg.get)
 
         # 해당 VSG의 실패 기여 GSFC 수 증가
-        vsg_list[fail_vsg_id].num_fail_gsfc += 1
+        vsg_list[fail_vsg_id].num_failed_gsfc += 1
 
     def time_tic(self, t, data_rate_pair, all_vsg_list, all_gserver_list, all_sat_list, G, vsg_G):
         # GSFC 처리 로직

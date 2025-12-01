@@ -45,12 +45,16 @@ class Simulation:
 
         # eMBB gateway 관련 파라미터
         gw_city_df = pd.read_csv("./data/gateways_starlink_sx.csv")
+        gw_continent_df = pd.read_csv("./data/gateway_continets.csv")
+        flight_path_df = pd.read_csv("./data/flight_paths.csv")
+
         self.gw_city_df = gw_city_df[["lat", "lng"]].reset_index(drop=True)
         self.gw_city_lats = self.gw_city_df["lat"].to_numpy(dtype=float)
         self.gw_city_lons = self.gw_city_df["lng"].to_numpy(dtype=float)
 
-        gw_continent_df = pd.read_csv("./data/gateway_continets.csv")
         self.gw_continent_df = gw_continent_df[["lat", "lng"]].reset_index(drop=True)
+
+        self.flight_path_df = flight_path_df[["lat", "lng"]].reset_index(drop=True)
 
     def set_constellation(self, mode):
         phasing_inter_plane = 180 / NUM_ORBITS
@@ -99,7 +103,9 @@ class Simulation:
 
         return distance_m
 
-    def initial_vsg_regions(self, mode):
+    def initial_vsg_regions(self, mode, lon_step = None):
+        if lon_step is None:
+            lon_step = LON_STEP
         self.vsg_list = []
         self.gserver_list = []
         self.vsg_G = nx.Graph()
@@ -108,15 +114,15 @@ class Simulation:
         gid = 0
 
         lat_bins = np.arange(LAT_RANGE[0], LAT_RANGE[1]+1, LAT_STEP)
-        lon_bins = np.arange(LON_RANGE[0], LON_RANGE[1]+1, LON_STEP)
+        lon_bins = np.arange(LON_RANGE[0], LON_RANGE[1]+1, lon_step)
 
         num_row = math.ceil((LAT_RANGE[1] - LAT_RANGE[0]) / LAT_STEP)
-        num_col = math.ceil((LON_RANGE[1] - LON_RANGE[0]) / LON_STEP)
+        num_col = math.ceil((LON_RANGE[1] - LON_RANGE[0]) / lon_step)
 
         for lat_min in lat_bins:
             lat_max = lat_min + LAT_STEP
             for lon_min in lon_bins:
-                lon_max = lon_min + LON_STEP
+                lon_max = lon_min + lon_step
 
                 # 현재 그리드 셀 안에 속하는 위성 추출
                 cell_sats = [
@@ -129,7 +135,7 @@ class Simulation:
                     continue
 
                 center_lat = (lat_min + LAT_STEP) / 2
-                center_lon = (lon_min + LON_STEP) / 2
+                center_lon = (lon_min + lon_step) / 2
 
                 ground_server = Gserver(gid, center_lon, center_lat, vid)
 
@@ -366,7 +372,18 @@ class Simulation:
     # ---------------------------------------------------------
     # 2. 트래픽 생성 로직
     # ---------------------------------------------------------
-    def pick_random_vsg_city(self, range):
+    def pick_random_flight_path_point(self):
+        """
+        항공로 데이터에서 랜덤한 지점(lat, lon) 하나를 반환
+        """
+        if self.flight_path_df.empty:
+            return None, None
+
+        idx = random.randrange(len(self.flight_path_df))
+        row = self.flight_path_df.iloc[idx]
+        return float(row["lat"]), float(row["lng"])
+
+    def pick_random_vsg_gw(self, range):
         """
         CSV에서 랜덤 도시 하나 뽑아서 (lat, lon, vsg_id) 반환
         """
@@ -384,6 +401,20 @@ class Simulation:
 
         gw_vsg_id = get_vsg_id_from_coords(self.vsg_list, gw_lat, gw_lon)
         return gw_vsg_id, gw_lat, gw_lon
+
+    def nearest_gateway_coords(self, lat, lon):
+        """
+        (lat_deg, lon_deg)에서 거리 기준으로 가장 가까운 gateway의 (lat, lon)을 반환
+        """
+        c = self.calculate_haversine_distance(lat, lon, self.gw_city_lats, self.gw_city_lons)
+
+        # 지구 반지름 곱하면 실제 거리지만, argmin만 필요하니까 c만 써도 됨
+        idx = int(np.argmin(c))
+        return float(self.gw_city_lats[idx]), float(self.gw_city_lons[idx])
+
+    def pick_nearest_dst_vsg(self, lat, lon):
+        gw_lat, gw_lon = self.nearest_gateway_coords(lat, lon)
+        return get_vsg_id_from_coords(self.vsg_list, gw_lat, gw_lon)
 
     def generate_embb_cluster(self, hub_lat, hub_lon, radius_km, mode):
         """
@@ -409,27 +440,13 @@ class Simulation:
                 pkt_size = min(int(sizes[i]), EMBB_PACKET_MAX_SIZE)
 
                 src_vsg_id = get_vsg_id_from_coords(self.vsg_list, p_lat, p_lon)
-                dst_vsg_id, dst_lat, dst_lon = self.pick_random_vsg_city(range='city')
+                dst_vsg_id, dst_lat, dst_lon = self.pick_random_vsg_gw(range='continent')
 
                 gsfc_type = 'eMBB'
                 # TODO. gsfc가 변동될 것을 고려해서 dst_lat, dst_lon도 넘겨야하나?
                 gsfc = GSFC(self.generated_gsfc_id, src_vsg_id, dst_vsg_id, pkt_size, SFC_EMBB_SEQ, EMBB_LATENCY_LIMIT, mode, gsfc_type, self.gsfc_log_path, p_lon, p_lat)
                 self.gsfc_list.append(gsfc)
                 self.generated_gsfc_id += 1
-
-    def nearest_gateway_coords(self, lat, lon):
-        """
-        (lat_deg, lon_deg)에서 거리 기준으로 가장 가까운 gateway의 (lat, lon)을 반환
-        """
-        c = self.calculate_haversine_distance(lat, lon, self.gw_city_lats, self.gw_city_lons)
-
-        # 지구 반지름 곱하면 실제 거리지만, argmin만 필요하니까 c만 써도 됨
-        idx = int(np.argmin(c))
-        return float(self.gw_city_lats[idx]), float(self.gw_city_lons[idx])
-
-    def pick_nearest_dst_vsg(self, lat, lon):
-        gw_lat, gw_lon = self.nearest_gateway_coords(lat, lon)
-        return get_vsg_id_from_coords(self.vsg_list, gw_lat, gw_lon)
 
     def generate_urllc_cluster(self, hub_lat, hub_lon, radius_km, current_time_ms, mode):
         """
@@ -446,7 +463,7 @@ class Simulation:
                 p_lon = random.gauss(hub_lon, sigma)
 
                 src_vsg_id = get_vsg_id_from_coords(self.vsg_list, p_lat, p_lon)
-                dst_vsg_id = self.pick_nearest_dst_vsg(p_lat, p_lon)
+                dst_vsg_id = self.pick_nearest_dst_vsg(p_lat, p_lon) # Todo. src, dst vsg 동일하지 않게
 
                 gsfc_type = 'URLLC'
                 gsfc = GSFC(self.generated_gsfc_id, src_vsg_id, dst_vsg_id, URLLC_PACKET_SIZE, SFC_URLLC_SEQ, URLLC_LATENCY_LIMIT, mode,
@@ -467,14 +484,26 @@ class Simulation:
         num_packets = np.random.poisson(expected_num_per_ms)
 
         for _ in range(num_packets):
-            lat = random.uniform(-90, 90)
-            lon = random.uniform(-180, 180)
+            lat, lon = 0, 0
+            while True:
+                # 1. 랜덤 좌표 생성
+                lat = random.uniform(-90, 90)
+                lon = random.uniform(-180, 180)
 
-            if -60 <= lat < 60:
-                continue
+                # 2. 조건 확인
+                # 조건 A: 극지방인가? (위도 절댓값 60 이상)
+                is_polar = abs(lat) >= 60
+
+                # 조건 B: 바다인가? (육지가 아닌가?)
+                # globe.is_land(lat, lon)은 육지면 True, 바다면 False를 반환
+                is_ocean = not globe.is_land(lat, lon)
+
+                # 둘 중 하나라도 만족하면 루프 탈출 (유효 좌표)
+                if is_polar or is_ocean:
+                    break
 
             src_vsg_id = get_vsg_id_from_coords(self.vsg_list, lat, lon)
-            dst_vsg_id, dst_lat, dst_lon = self.pick_random_vsg_city(range='continent')
+            dst_vsg_id, dst_lat, dst_lon = self.pick_random_vsg_gw(range='continent')
 
             gsfc_type = 'mMTC'
             gsfc = GSFC(self.generated_gsfc_id, src_vsg_id, dst_vsg_id, MMTC_PACKET_SIZE, SFC_MMTC_SEQ, MMTC_LATENCY_LIMIT, mode,
@@ -484,20 +513,80 @@ class Simulation:
 
     def generate_traffic(self, current_sim_time_ms, mode):
         """
-        [Main Generator]
-        기존 generate_traffic_snapshot 대체.
-        10ms 동안 발생하는 모든 트래픽을 시뮬레이션하여 반환.
+        [Main Generator] 수정됨
+        MAJOR_HUBS 루프를 제거하고, 랜덤 게이트웨이 기반으로 트래픽 생성
         """
-        # 1. Hub별 트래픽 생성
-        src_vsg_id, src_lat, src_lon = self.pick_random_vsg_city(range='city')
-        # TODO. 생성 위치 변경
-        for lat, lon, p_type, rad in MAJOR_HUBS:
-            if p_type == "eMBB": # 6개
-                self.generate_embb_cluster(lat, lon, rad, mode)
-            if p_type == "URLLC": # 799개
-                self.generate_urllc_cluster(lat, lon, rad, current_sim_time_ms, mode)
 
-        # 2. 배경 mMTC 트래픽 생성 # 21개
+        # ---------------------------------------------------------
+        # 1. eMBB 트래픽 생성 (Global Poisson Process)
+        # ---------------------------------------------------------
+        # 1ms 동안 전체 네트워크에서 발생할 기대 패킷 수 (Lambda)
+        # 만약 GLOBAL_EMBB_ARRIVAL_RATE가 20000이면, 1ms당 평균 20개
+        lam = EMBB_ARRIVAL_RATE / 1000.0
+
+        # 이번 1ms에 실제로 발생할 이벤트(패킷 생성 요청) 수
+        num_embb_events = np.random.poisson(lam)
+
+        if num_embb_events > 0:
+            # 패킷 사이즈 미리 생성 (Pareto)
+            sizes = (np.random.pareto(EMBB_PARETO_SHAPE, num_embb_events) + 1) * EMBB_PACKET_MAX_SIZE
+
+            for i in range(num_embb_events):
+                # 1) 랜덤 출발지 선정 todo. (항공 길)
+                src_lat, src_lon = self.pick_random_flight_path_point()
+                src_vsg_id = get_vsg_id_from_coords(self.vsg_list, src_lat, src_lon)
+
+                # 2) 랜덤 도착지 선정 (Continent 레벨)
+                dst_vsg_id, dst_lat, dst_lon = self.pick_random_vsg_gw(range='continent')
+
+                # src와 dst가 같다면 todo. 다시 뽑거나
+                if src_vsg_id == dst_vsg_id:
+                    continue
+
+                pkt_size = min(int(sizes[i]), EMBB_PACKET_MAX_SIZE)
+
+                gsfc_type = 'eMBB'
+                gsfc = GSFC(self.generated_gsfc_id, src_vsg_id, dst_vsg_id, pkt_size,
+                            SFC_EMBB_SEQ, EMBB_LATENCY_LIMIT, mode, gsfc_type,
+                            self.gsfc_log_path, src_lon, src_lat)
+                self.gsfc_list.append(gsfc)
+                self.generated_gsfc_id += 1
+
+        # ---------------------------------------------------------
+        # 2. URLLC 트래픽 생성 (Periodic Random Burst)
+        # ---------------------------------------------------------
+        # 특정 주기마다 '랜덤한 N개의 도시'에서 긴급 트래픽 발생
+        NUM_ACTIVE_URLLC_SOURCES = 10  # 예: 한 주기에 10개 도시 활성화
+
+        if current_sim_time_ms % URLLC_PERIOD == 0:
+
+            # 이번 틱에 활성화될 도시들을 랜덤으로 선정
+            for _ in range(NUM_ACTIVE_URLLC_SOURCES):
+                # 랜덤 도시 선정
+                src_vsg_id, hub_lat, hub_lon = self.pick_random_vsg_gw(range='city')
+
+                # 해당 도시 내 기기 수 (Burst) - 예: 2개 기기 동시 전송
+                num_devices = 2
+
+                for _ in range(num_devices):
+                    radius_km = 30  # URLLC 커버리지
+                    sigma = radius_km / 111.0 / 3
+                    p_lat = random.gauss(hub_lat, sigma)
+                    p_lon = random.gauss(hub_lon, sigma)
+
+                    real_src_vsg_id = get_vsg_id_from_coords(self.vsg_list, p_lat, p_lon)
+                    dst_vsg_id = self.pick_nearest_dst_vsg(p_lat, p_lon)
+
+                    gsfc_type = 'URLLC'
+                    gsfc = GSFC(self.generated_gsfc_id, real_src_vsg_id, dst_vsg_id,
+                                URLLC_PACKET_SIZE, SFC_URLLC_SEQ, URLLC_LATENCY_LIMIT, mode,
+                                gsfc_type, self.gsfc_log_path, p_lon, p_lat)
+                    self.gsfc_list.append(gsfc)
+                    self.generated_gsfc_id += 1
+
+        # ---------------------------------------------------------
+        # 3. mMTC 배경 트래픽 (기존 유지)
+        # ---------------------------------------------------------
         self.generate_global_mmtc(mode)
 
     def interval_overlap(self, a_min, a_max, b_min, b_max, eps=1e-6):
@@ -555,7 +644,10 @@ class Simulation:
                 dist = self.get_distance_between_VSGs(v1.id, v2.id)
                 self.vsg_G.add_edge(v1.id, v2.id, weight=dist)
 
-    def visualized_network_constellation(self, t, filename="./results/network_constellation.png"):
+    def visualized_network_constellation(self, t, lon_step=None, filename="./results/network_constellation.png"):
+        if lon_step is None:
+            lon_step = LON_STEP
+
         # 경로 추적
         if (self.test_gsfc_id == -1) or (self.gsfc_list[self.test_gsfc_id].is_succeed):
             if len(self.gsfc_list) < 1:
@@ -594,8 +686,8 @@ class Simulation:
 
         # 시나리오별 색상 및 마커 설정
         styles = {
-            "URLLC": {"color": "magenta", "marker": "^", "s": 50, "label": "URLLC"},  # 중요! 눈에 띄게
-            "eMBB": {"color": "red", "marker": "o", "s": 50, "label": "eMBB"},
+            "URLLC": {"color": "red", "marker": "^", "s": 50, "label": "URLLC"},
+            "eMBB": {"color": "green", "marker": "$\u2708$", "s": 150, "label": "eMBB"},
             "mMTC": {"color": "cyan", "marker": "*", "s": 50, "label": "mMTC"},
         }
 
@@ -617,7 +709,7 @@ class Simulation:
 
         # 0. VSG 영역 표현
         for vsg in self.vsg_list:
-            rect = Rectangle((vsg.lon_min, vsg.lat_min), LON_STEP, LAT_STEP,
+            rect = Rectangle((vsg.lon_min, vsg.lat_min), lon_step, LAT_STEP,
                              linewidth=0.8, edgecolor=vsg_colors[vsg.id], facecolor=vsg_colors[vsg.id],
                              alpha=0.4, zorder=0)
             ax.add_patch(rect)
@@ -791,7 +883,7 @@ class Simulation:
 
         plt.close(fig)
 
-    def simulation_proceeding(self, mode, data_rate_pair, csv_dir_path):
+    def simulation_proceeding(self, mode, lon_step, data_rate_pair, csv_dir_path):
         self.gsfc_log_path = init_gsfc_csv_log(csv_dir_path, mode)
         self.sat_log_path = init_sat_csv_log(csv_dir_path, mode)
         self.vsg_log_path = init_vsg_csv_log(csv_dir_path, mode)
@@ -799,7 +891,7 @@ class Simulation:
 
         # 1. 토폴로지 초기화
         self.set_constellation(mode)
-        self.initial_vsg_regions(mode)
+        self.initial_vsg_regions(mode, lon_step)
         self.initial_vnfs_to_vsg()
         self.compute_all_pair_distance(csv_dir_path, mode)
 
@@ -809,7 +901,7 @@ class Simulation:
         t = 0 #ms
 
         # while True:
-        for i in range(500):
+        for i in range(10):
             print(f"\n==================== TIME TICK {t} MS ====================")
 
             # gsfc 생성
@@ -859,8 +951,9 @@ class Simulation:
             lost_vnf_type_list = {}  # key: vsg_id, value: lost_vnf_types
             is_topology_changed = False
 
-            while i < len(self.vsg_list): # 중간에 vsg 추가되어도 추가된 vsg까지 검사하기 위함
-                vsg = self.vsg_list[i]
+            # while i < len(self.vsg_list): # 중간에 vsg 추가되어도 추가된 vsg까지 검사하기 위함
+            for vsg in self.vsg_list:
+                # vsg = self.vsg_list[i]
                 lost_vnf_type_list[vsg.id] = []
                 lost_vnf_types = vsg.time_tic(self.vsg_list, self.sat_list, self.gsfc_list, t)
                 lost_vnf_type_list[vsg.id].extend(lost_vnf_types)

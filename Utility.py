@@ -532,7 +532,7 @@ def load_networkx_graph(file_path):
         print(f"[ERROR] Failed to load graph: {e}")
         return None
 
-def load_all_gsfc_logs(modes, data_rate_pairs, base_results_dir="./results"):
+def load_all_gsfc_logs(modes, lon_steps, data_rate_pairs, base_results_dir="./results"):
     """
     results/{NUM_GSFC*NUM_ITERATIONS}/{mode}/{sat_Mbps}sat_{gs_Mbps}gs/gsfc_log_{mode}.csv
     구조로 저장된 로그를 모두 읽어서 하나의 DataFrame으로 합친다.
@@ -542,26 +542,30 @@ def load_all_gsfc_logs(modes, data_rate_pairs, base_results_dir="./results"):
         sat_mbps = sat_rate / 1e6
         gs_mbps = gs_rate / 1e6
         data_rate_label = f"{sat_mbps}sat_{gs_mbps}gs"
+        for lon_step in lon_steps:
+            for mode in modes:
+                csv_dir = f"{base_results_dir}/{lon_step}_{NUM_GSFC*NUM_ITERATIONS}/{mode}/{data_rate_label}/"
+                csv_path = f"{csv_dir}{mode}_gsfc_log.csv"
 
-        for mode in modes:
-            csv_dir = f"{base_results_dir}/{NUM_GSFC*NUM_ITERATIONS}/{mode}/{data_rate_label}/"
-            csv_path = f"{csv_dir}{mode}_gsfc_log.csv"
+                if not os.path.exists(csv_path):
+                    print(f"[WARN] CSV not found: {csv_path}")
+                    continue
 
-            if not os.path.exists(csv_path):
-                print(f"[WARN] CSV not found: {csv_path}")
-                continue
+                df = pd.read_csv(csv_path)
 
-            df = pd.read_csv(csv_path)
+                # 혹시 mode 컬럼 없으면 붙여주기
+                if "mode" not in df.columns:
+                    df["mode"] = mode
 
-            # 혹시 mode 컬럼 없으면 붙여주기
-            if "mode" not in df.columns:
-                df["mode"] = mode
+                # 혹시 lon_step 컬럼 없으면 붙여주기
+                if "lon_step" not in df.columns:
+                    df["lon_step"] = lon_step
 
-            df["sat_rate_bps"] = sat_rate
-            df["gs_rate_bps"] = gs_rate
-            df["data_rate_label"] = data_rate_label
+                df["sat_rate_bps"] = sat_rate
+                df["gs_rate_bps"] = gs_rate
+                df["data_rate_label"] = data_rate_label
 
-            dfs.append(df)
+                dfs.append(df)
 
     if not dfs:
         print("[ERROR] No CSV loaded")
@@ -621,7 +625,7 @@ def preprocess_gsfc_logs(df_all):
 
     return df_succ
 
-def plot_e2e_vs_data_rate(df_succ, out_path="e2e_vs_data_rate_per_mode.png"):
+def plot_e2e_vs_data_rate(df_succ, lon_steps, out_path="e2e_vs_data_rate_per_mode.png"):
     """
     각 mode에 대해 data_rate_pair에 따른 E2E delay 변화를 라인 그래프로.
     """
@@ -643,19 +647,22 @@ def plot_e2e_vs_data_rate(df_succ, out_path="e2e_vs_data_rate_per_mode.png"):
     labels = label_order["data_rate_label"].tolist()
 
     plt.figure()
-    for mode in modes:
-        df_mode = df_succ[df_succ["mode"] == mode]
-        # mode + data_rate_label 그룹으로 평균 E2E
-        grp = (
-            df_mode.groupby("data_rate_label")["total delay"]
-            .mean()
-            .reindex(labels)
-        )
-        plt.plot(labels, grp.values, marker="o", label=mode)
+    for lon_step in lon_steps:
+        for mode in modes:
+            df_mode = df_succ[
+                (df_succ["mode"] == mode) & (df_succ["lon_step"] == lon_step)
+            ]
+            # mode + data_rate_label 그룹으로 평균 E2E
+            grp = (
+                df_mode.groupby("data_rate_label")["total delay"]
+                .mean()
+                .reindex(labels)
+            )
+            plt.plot(labels, grp.values, marker="o", label=f"{mode}, lon_step={lon_step}")
 
     plt.xlabel("Data rate pair (sat_Mbps / gs_Mbps)")
     plt.ylabel("Average E2E delay [ms]")
-    plt.title("E2E delay vs data_rate_pair (per mode)")
+    plt.title("E2E delay vs data_rate_pair (per mode, per lon_step)")
     plt.grid(True)
     plt.legend()
     plt.tight_layout()
@@ -683,24 +690,24 @@ def plot_e2e_vs_mode(df_succ, out_dir="./", prefix="e2e_vs_mode_"):
 
     # data_rate_label 단위로 loop
     for data_rate_label, df_pair in df_succ.groupby("data_rate_label"):
-        df_agg = df_pair.groupby("mode")[delay_components].mean()
-
-        modes = sorted(df_agg.index.tolist())
-        df_agg = df_agg.reindex(modes)
+        df_agg = df_pair.groupby(["mode", "lon_step"])[delay_components].mean()
 
         # 데이터가 비어있으면 건너뜁니다.
         if df_agg.empty:
             print(f"[WARN] No aggregated data for data_rate_label {data_rate_label}")
             continue
 
-        x = np.arange(len(modes))
+        # 인덱스 정렬 (mode, lat_step 순)
+        df_agg = df_agg.sort_index()  # MultiIndex: (mode, lat_step)
 
-        bottom_df = df_agg.iloc[:, :-1].cumsum(axis=1)
-        zeros = pd.DataFrame(0, index=df_agg.index, columns=[f"bottom_0"])
-        bottom_df = pd.concat([zeros, bottom_df], axis=1)
+        # x축에 쓸 라벨: "mode\nlat{lat_step}"
+        idx_tuples = df_agg.index.tolist()
+        labels = [f"{mode}\nlat{lat_step}" for (mode, lat_step) in idx_tuples]
 
-        plt.figure(figsize=(8, 6))
-        current_bottom = np.zeros(len(modes))
+        x = np.arange(len(labels))
+
+        plt.figure(figsize=(max(8, len(labels) * 0.6), 6))
+        current_bottom = np.zeros(len(labels))
         bar_containers = {}
 
         for i, component in enumerate(delay_components):
@@ -726,7 +733,7 @@ def plot_e2e_vs_mode(df_succ, out_dir="./", prefix="e2e_vs_mode_"):
                     plt.text(bar.get_x() + bar.get_width() / 2.0, y_center,
                              f"{val:.1f}", ha="center", va="center", fontsize=8)
 
-        current_bottom_annotation = np.zeros(len(modes))
+        current_bottom_annotation = np.zeros(len(labels))
 
         for i, component in enumerate(delay_components):
             delay_values = df_agg[component].values
@@ -738,7 +745,7 @@ def plot_e2e_vs_mode(df_succ, out_dir="./", prefix="e2e_vs_mode_"):
             # 다음 주석을 위해 누적 합 업데이트
             current_bottom_annotation += delay_values
 
-        plt.xticks(x, modes, rotation=0)
+        plt.xticks(x, labels, rotation=30)
         plt.ylabel("Average E2E Delay [ms]")
         plt.title(f"Average E2E Delay Breakdown by Mode (data_rate={data_rate_label})")
         plt.legend(loc='upper left', bbox_to_anchor=(1.05, 1))
@@ -752,7 +759,7 @@ def plot_e2e_vs_mode(df_succ, out_dir="./", prefix="e2e_vs_mode_"):
         plt.close()  # 메모리 관리를 위해 플롯 닫기
         print(f"[INFO] Saved {out_path}")
 
-def plot_e2e_summary(modes, data_rate_pairs, base_results_dir="./results"):
+def plot_e2e_summary(modes, lon_steps, data_rate_pairs, base_results_dir="./results"):
     """
     main.py에서 시뮬 다 돈 뒤에 한 번 호출:
     - 모든 mode × data_rate_pair CSV를 읽고
@@ -760,7 +767,7 @@ def plot_e2e_summary(modes, data_rate_pairs, base_results_dir="./results"):
     - 1) mode 고정, data_rate_pair 비교 (라인 그래프)
     - 2) data_rate_pair 고정, mode 비교 (bar 그래프)
     """
-    df_all = load_all_gsfc_logs(modes, data_rate_pairs, base_results_dir)
+    df_all = load_all_gsfc_logs(modes, lon_steps, data_rate_pairs, base_results_dir)
     df_succ = preprocess_gsfc_logs(df_all)
 
     if df_succ.empty:
@@ -774,6 +781,7 @@ def plot_e2e_summary(modes, data_rate_pairs, base_results_dir="./results"):
     # 1) [모드별] data_rate_pair 비교
     plot_e2e_vs_data_rate(
         df_succ,
+        lon_steps,
         out_path=os.path.join(out_dir, "e2e_vs_data_rate_per_mode.png"),
     )
 

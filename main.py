@@ -21,25 +21,27 @@ class Main:
     ]
 
     modes = ['basic']  # dd, basic, sd, upgrade_sd
-    #main: 15, dd: 30
+    lon_steps = [72]
 
     for pair in tqdm(data_rate_pairs):
-        for mode in modes:
-            csv_dir_path = f"./results/{NUM_GSFC*NUM_ITERATIONS}/{mode}/{pair[0] / 1e6}sat_{pair[1] / 1e6}gs/"
+        for lon_step in tqdm(lon_steps):
+            for mode in modes:
+                csv_dir_path = f"./results/{lon_step}_{NUM_GSFC*NUM_ITERATIONS}/{mode}/{pair[0] / 1e6}sat_{pair[1] / 1e6}gs/"
 
-            simulation = Simulation()
-            simulation.simulation_proceeding(mode, pair, csv_dir_path)
+                simulation = Simulation()
+                simulation.simulation_proceeding(mode, lon_step, pair, csv_dir_path)
 
     for pair in tqdm(data_rate_pairs):
-        for mode in modes:
-            csv_dir_path = f"./results/{NUM_GSFC * NUM_ITERATIONS}/{mode}/{pair[0] / 1e6}sat_{pair[1] / 1e6}gs/{mode}_gsfc_log.csv"
-            calculate_additional_path_stats(csv_dir_path)
-            calculate_success_hop_stats(csv_dir_path)
-            # animate_one_gsfc(0, modes, csv_dir_path)
+        for lon_step in tqdm(lon_steps):
+            for mode in modes:
+                csv_dir_path = f"./results/{lon_step}_{NUM_GSFC * NUM_ITERATIONS}/{mode}/{pair[0] / 1e6}sat_{pair[1] / 1e6}gs/{mode}_gsfc_log.csv"
+                calculate_additional_path_stats(csv_dir_path)
+                calculate_success_hop_stats(csv_dir_path)
 
     # 시뮬 다 돌리고 나서 한 번만 호출
     plot_e2e_summary(
         modes=modes,
+        lon_steps=lon_steps,
         data_rate_pairs=data_rate_pairs,
         base_results_dir="./results",
     )
