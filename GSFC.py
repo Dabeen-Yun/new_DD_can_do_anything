@@ -83,6 +83,7 @@ class GSFC:
                 return []
 
             try:
+                # print(f"prev_vsg: {prev_vsg_id} target_vsg: {vsg.id}")
                 hop_sorted = sorted(
                     candidate_vsgs,
                     key=lambda vsg: nx.shortest_path_length(vsg_G, source=prev_vsg_id, target=vsg.id)
@@ -533,7 +534,7 @@ class GSFC:
                                 for seg in segment[1:-1]:
                                     full_path.append([seg, (None)])
                     full_path.append([path[-1], ("dst")])
-                    full_vsg_path.append((self.dst_vsg_id, "src"))
+                    full_vsg_path.append((self.dst_vsg_id, "dst"))
                 else:
                     if path[i - 1] == path[i]:
                         vnf_sat_id = path[i]
@@ -869,19 +870,19 @@ class GSFC:
 
     def DH_eval_proc_delay(self, node=None, node_type=None, data_rate_pair=None):
         if data_rate_pair is None:
-            sat_processing_rate = SAT_PROCESSING_RATE
+            sat_processing_rate = SAT_PROCESSING_RATE/max(len(node.vnf_list), 1) # node에 탑재된 게 없는 경우 커버 (해당 노드는 그냥 passing하기만 함)
             gserver_processing_rate = GSERVER_PROCESSING_RATE
         else:
-            sat_processing_rate = data_rate_pair[0]
+            sat_processing_rate = data_rate_pair[0]/max(len(node.vnf_list), 1)
             gserver_processing_rate = data_rate_pair[1]
 
-        # num_computing_gsfc = max(len(node.process_queue), 1)\
+        # num_computing_gsfc = max(len(node.process_queue), 1)
         num_computing_gsfc = 1
         if node_type == 'satellite':
             current_timeslot_capa = sat_processing_rate / num_computing_gsfc
         elif node_type == 'gserver':
             current_timeslot_capa = gserver_processing_rate / num_computing_gsfc
-        # TODO. current_remaining_vnf_process 업데이트 하는 곳이 없음 (계속 0)
+
         self.current_remaining_vnf_process -= current_timeslot_capa
         estimated_remain_proc_delay = math.ceil(self.current_remaining_vnf_process / current_timeslot_capa)
         # 이 gsfc가 이번 time slot에서 끝나면 0, 아니면 estimated_remain_proc_delay 반환
@@ -983,7 +984,14 @@ class GSFC:
                     write_gsfc_csv_log(self.gsfc_log_path, t, self, "DROP")
                     input("경로가 끝났을 리 없어~~~~~")
         else: # 경로 남음
-            if t > self.tolerance_time_ms: # 허용 가능 시간 초과
+            current_delay = (
+                    getattr(self, "proc_delay_ms", 0)
+                    + getattr(self, "proc_queue_delay_ms", 0)
+                    + getattr(self, "queue_delay_ms", 0)
+                    + getattr(self, "trans_delay_ms", 0)
+                    + getattr(self, "prop_delay_ms", 0)
+            )
+            if current_delay > self.tolerance_time_ms: # 허용 가능 시간 초과
                 self.is_dropped = True
                 self.update_num_failed_gsfc_per_vsg(all_sat_list, all_vsg_list)
 

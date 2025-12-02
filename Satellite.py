@@ -36,7 +36,7 @@ class Satellite:
         self.inclination = d2r(86.4)
 
         # 궤도 속도 (Mean Motion) 계산
-        mu = 3.986004418e5 # 지구 중력 상수
+        mu = 3.986004418e14 # 지구 중력 상수 [m^3/s^2]
         self.mean_motion = math.sqrt(mu / self.radius ** 3)
 
         # 위치 (Lat: -90~90, Lon: -180~180)
@@ -232,8 +232,19 @@ class Satellite:
             for item in self.process_queue
         )
 
+        entry = [gsfc.id, gsfc.vnf_id, gsfc.vnf_sizes[gsfc.vnf_id], gsfc.gsfc_type]
+
         if not is_duplicate:
-            self.process_queue.append([gsfc.id, gsfc.vnf_id, gsfc.vnf_sizes[gsfc.vnf_id]])
+            if gsfc.gsfc_type == "URLLC":
+                insert_idx = 0
+                for i, (_, _, _, gtype) in enumerate(self.process_queue):
+                    if gtype == 'URLLC':
+                        insert_idx = i + 1  # 마지막 URLLC 뒤
+
+                # 2) 그 위치에 삽입
+                self.process_queue.insert(insert_idx, entry)
+            else:
+                self.process_queue.append(entry)
 
     def remove_process_queue(self, gsfc):
         target_gsfc_id = gsfc.id

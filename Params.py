@@ -9,8 +9,8 @@ NUM_SATELLITES = 66
 NUM_SATELLITES_PER_ORBIT = NUM_SATELLITES // NUM_ORBITS
 SATELLITE_SPEED = 7.4 #km/s 27000 km/h
 DEGREE_TO_KM = 111 # 6378 지구 반지름에 따른 위도 1도 거리
-LAT_RANGE = [-90, 90]
-LON_RANGE = [-180, 180]
+LAT_RANGE = [-90, 90] #[-30, 30] #[-90, 90]
+LON_RANGE = [-180, 180] #[-180, -108] #[-180, 180]
 
 LAT_STEP = 60
 LON_STEP = 72 #36, 72
@@ -19,7 +19,7 @@ PARAM_C = 299792458 # [m/s]
 VNF_SIZE = 1e6 # [bit]  ≈125 KB
 
 # simulation
-NUM_ITERATIONS = 10 # ms
+NUM_ITERATIONS = 50 # ms
 NUM_GSFC = 1 #33 # int(2*1024*1024/SFC_SIZE*8) #[per ms]
 
 # VSG
@@ -32,8 +32,8 @@ NUM_GSFC = 1 #33 # int(2*1024*1024/SFC_SIZE*8) #[per ms]
 # 6: egress
 VNF_TYPES_PER_VSG = (1, 7)
 
-NUM_VNFS_PER_SAT = 1 #10
-NUM_VNFS_PER_VSG = 1 #2
+NUM_VNFS_PER_SAT = 4 #10
+NUM_VNFS_PER_VSG = 4 #2
 
 # satellite capacity
 # SAT_QUEUE_SIZE = (SFC_SIZE // 8) * 50 * 8 # [bit] (SFC_SIZE[B] * 50) * 8
@@ -49,26 +49,11 @@ GSERVER_LINK_CAPACITY = 500 * 1e6 # [bps]
 GSERVER_PROCESSING_RATE = 1600 * 1e6 # [bps]
 GSERVER_NUM_PROCESS_VNF = 4 # 동시에 처리 가능한 VNF 수
 
-
-# 실제 위경도 좌표 사용 (Latitude: -90~90, Longitude: -180~180 변환 필요)
-# 0~360 Longitude를 쓰신다면 -180~180으로 변환하는 로직을 추가하거나 데이터를 0~360으로 맞추면 됩니다.
-MAJOR_HUBS = [
-    # (Lat, Lon, Type, Radius_km)
-    (37.5665, 126.9780, "eMBB", 50),   # Seoul
-    (35.6762, 139.6503, "eMBB", 60),   # Tokyo
-    (40.7128, -74.0060, "eMBB", 60),   # New York
-    (51.5074, -0.1278,  "eMBB", 50),   # London
-    (31.2304, 121.4737, "URLLC", 40),  # Shanghai (Port + City)
-    (1.3521, 103.8198,  "URLLC", 30),  # Singapore (Port + City)
-    (51.9244, 4.4777,   "URLLC", 20),  # Rotterdam (Major Port)
-    (25.0478, 55.1732,  "URLLC", 20),  # Jebel Ali (Dubai Port)
-]
-
 # mMTC(S&F): DDoS[1] → FW[2] → TCP[3] → NAT[4]
 # uRLLC(Local): FW[2]
 # eMBB(UE-SAT-UE): DDoS[1] → FW[2] → LB[5] → TCP[3] → VideoOpt[6]
 SFC_EMBB_SEQ = ['1', '2', '5', '3', '6']         # 고처리량, 보안, 주소변환
-SFC_URLLC_SEQ = ['2']     # 저지연, 경로 최적화
+SFC_URLLC_SEQ = ['2', '5']     # 저지연, 경로 최적화
 SFC_MMTC_SEQ = ['1', '2', '3', '4']             # 대규모 연결 관리
 
 # eMBB 파라미터
