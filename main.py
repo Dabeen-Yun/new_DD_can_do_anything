@@ -8,7 +8,8 @@ from Utility import *
 
 class Main:
     data_rate_pairs = [  # [sat, gs] 단위 bps 1e6
-        (250e3, 250e3), # 250Mbps
+        # (250e3, 250e3), # 250Mbps
+        (1e6, 250e3)
     ]
 
     modes = ['basic', 'dd'] #['basic', 'dd']  # dd, basic, sd, upgrade_sd
